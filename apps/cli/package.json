@@ -1,0 +1,55 @@
+{
+  "name": "greatping",
+  "version": "0.1.0",
+  "description": "Get an alert on your phone when your coding agent needs you",
+  "keywords": [
+    "cli",
+    "agents",
+    "claude-code",
+    "codex",
+    "mcp",
+    "notifications",
+    "push"
+  ],
+  "homepage": "https://github.com/nobottomline/greatping#readme",
+  "bugs": {
+    "url": "https://github.com/nobottomline/greatping/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nobottomline/greatping.git",
+    "directory": "apps/cli"
+  },
+  "license": "MIT",
+  "author": "Great Love",
+  "type": "module",
+  "bin": {
+    "greatping": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-transform-types --no-warnings --import ./test/ts-resolve.mjs --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "picocolors": "^1.1.1",
+    "toqr": "0.1.1",
+    "ws": "^8.18.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@greatping/protocol": "workspace:*",
+    "@types/node": "^22.13.11",
+    "@types/ws": "^8.5.14",
+    "tsup": "^8.4.0",
+    "typescript": "~5.9.3"
+  }
+}

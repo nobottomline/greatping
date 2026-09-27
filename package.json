@@ -1,0 +1,16 @@
+{
+  "name": "greatping-oss",
+  "private": true,
+  "description": "GreatPing CLI, agent skill and wire protocol",
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -F greatping test",
+    "build": "pnpm -F greatping build",
+    "lint": "biome check ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.14",
+    "typescript": "~5.9.3"
+  },
+  "packageManager": "pnpm@10.33.0"
+}
