@@ -3,7 +3,11 @@ name: Release
 # Releases the CLI for the version in apps/cli/package.json. Versions are
 # bumped in the internal monorepo and arrive here with the sync. The GitHub
 # release and the npm package are checked separately, so a step that failed
-# or was skipped (no NPM_TOKEN yet) is completed by the next run.
+# or was skipped is completed by the next run.
+#
+# npm publishing uses trusted publishing (OIDC): no token is stored here, and
+# npm accepts only this workflow in this repository. It runs once the
+# repository variable NPM_PUBLISH is "true".
 on:
   push:
     branches: [main]
@@ -24,7 +28,7 @@ jobs:
           fetch-depth: 0
       - id: state
         env:
-          HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
+          NPM_PUBLISH: ${{ vars.NPM_PUBLISH }}
         run: |
           version=$(node -p "require('./apps/cli/package.json').version")
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -35,10 +39,10 @@ jobs:
           else
             on_npm=false
           fi
-          if [ "$on_npm" = false ] && [ "$HAS_NPM_TOKEN" != true ]; then
-            echo "NPM_TOKEN is not set; greatping@$version will not be published to npm."
+          if [ "$on_npm" = false ] && [ "$NPM_PUBLISH" != true ]; then
+            echo "NPM_PUBLISH is not true; greatping@$version will not be published to npm."
           fi
-          publish=$([ "$on_npm" = false ] && [ "$HAS_NPM_TOKEN" = true ] && echo true || echo false)
+          publish=$([ "$on_npm" = false ] && [ "$NPM_PUBLISH" = true ] && echo true || echo false)
           echo "publish=$publish" >> "$GITHUB_OUTPUT"
           work=$([ "$tagged" = false ] || [ "$publish" = true ] && echo true || echo false)
           echo "work=$work" >> "$GITHUB_OUTPUT"
@@ -74,12 +78,13 @@ jobs:
           esac
           gh release create "v$VERSION" "greatping-$VERSION.tgz" greatping.tgz \
             --title "greatping $VERSION" --generate-notes $flags
-      # Provenance links the npm package to this workflow run and commit.
+      # Trusted publishing needs npm 11.5.1 or later; provenance links the
+      # package to this workflow run and commit.
       - if: steps.state.outputs.publish == 'true'
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ steps.state.outputs.version }}
         run: |
+          npm install --global npm@latest
           case "$VERSION" in
             *-*) tag=next ;;
             *) tag=latest ;;
