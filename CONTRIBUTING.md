@@ -9,3 +9,7 @@ pnpm install
 pnpm typecheck && pnpm test && pnpm build
 node apps/cli/dist/index.js --help
 ```
+
+## Releases
+
+A release is cut automatically when `apps/cli/package.json` gets a new version: the release workflow runs the checks, tags `v<version>`, and attaches the npm package to a GitHub release (`greatping.tgz` always points at the latest one).
