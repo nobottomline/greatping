@@ -5,9 +5,12 @@ name: Release
 # release and the npm package are checked separately, so a step that failed
 # or was skipped is completed by the next run.
 #
-# npm publishing uses trusted publishing (OIDC): no token is stored here, and
-# npm accepts only this workflow in this repository. It runs once the
-# repository variable NPM_PUBLISH is "true".
+# npm releases are staged, not published: trusted publishing (OIDC, no stored
+# token) lets only this workflow submit a version, and it goes live only after
+# a maintainer approves it with two-factor authentication on npmjs.com or with
+# `npm stage approve <id>`. A compromised repository or workflow therefore
+# cannot ship a version on its own. Staging runs once the repository variable
+# NPM_PUBLISH is "true".
 on:
   push:
     branches: [main]
@@ -78,8 +81,9 @@ jobs:
           esac
           gh release create "v$VERSION" "greatping-$VERSION.tgz" greatping.tgz \
             --title "greatping $VERSION" --generate-notes $flags
-      # Trusted publishing needs npm 11.5.1 or later; provenance links the
-      # package to this workflow run and commit.
+      # Staging needs npm 11.15 or later; provenance links the package to this
+      # workflow run and commit. The exact tarball of the GitHub release is
+      # staged, from its unpacked directory.
       - if: steps.state.outputs.publish == 'true'
         env:
           VERSION: ${{ steps.state.outputs.version }}
@@ -89,4 +93,11 @@ jobs:
             *-*) tag=next ;;
             *) tag=latest ;;
           esac
-          npm publish "greatping-$VERSION.tgz" --access public --provenance --tag "$tag"
+          mkdir -p staged && tar -xzf "greatping-$VERSION.tgz" -C staged
+          if npm stage publish ./staged/package --access public --provenance --tag "$tag" 2>&1 | tee stage.log; then
+            echo "::notice::greatping@$VERSION is staged. Approve it on npmjs.com or with npm stage approve."
+          elif grep -qE "E409|already" stage.log; then
+            echo "::notice::greatping@$VERSION is already staged and waits for approval."
+          else
+            exit 1
+          fi
