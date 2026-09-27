@@ -5,7 +5,7 @@ description: Reach the user's phone through GreatPing. Use when the user asks to
 
 # GreatPing
 
-GreatPing sends alerts from this computer to the user's paired phone or tablet. It is driven by the `greatping` command (or GreatPing's MCP tools, when the host has them).
+GreatPing sends alerts from this computer to the user's paired phone or tablet. It is a preview: if pairing or the app is unavailable, say so rather than working around it. It is driven by the `greatping` command (or GreatPing's MCP tools, when the host has them).
 
 ## What already happens automatically
 

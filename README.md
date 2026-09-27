@@ -1,17 +1,13 @@
 # GreatPing
 
+> **Preview.** GreatPing is in active development. The mobile app is in private testing and not yet in the App Store or Google Play, so pairing a computer needs an invitation to the test. Commands, the service address and data may change without notice until the first stable release.
+
 Get an alert on your phone or tablet when a coding agent on your computer needs you: a question, a permission prompt, or a finished turn waiting for your next message.
 
 ```bash
 npm install -g greatping
 greatping login    # pair this computer with the GreatPing app
 greatping setup    # Claude Code and Codex alert your devices when they wait
-```
-
-Until the package is on npm, install the latest release directly:
-
-```bash
-npm install -g https://github.com/nobottomline/greatping/releases/latest/download/greatping.tgz
 ```
 
 ## How it works

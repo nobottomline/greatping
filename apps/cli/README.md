@@ -1,9 +1,11 @@
 # GreatPing CLI
 
+> **Preview.** GreatPing is in active development. The mobile app is in private testing and not yet in the App Store or Google Play, so pairing a computer needs an invitation to the test. Commands, the service address and data may change without notice until the first stable release.
+
 Get an alert on your phone or tablet when a coding agent on this computer needs you. Requires Node.js 20 or later and the GreatPing app.
 
 ```bash
-npm install -g greatping     # or: npm install -g https://github.com/nobottomline/greatping/releases/latest/download/greatping.tgz
+npm install -g greatping
 greatping login              # pair this computer (QR code or typed code)
 greatping setup              # alerts, skill and tools for Claude Code and Codex
 greatping status             # pairing, devices, pause, agents (--json available)

@@ -182,6 +182,9 @@ function printHelp(): void {
   print();
   print(`  ${color.bold('GreatPing')} ${muted(`v${VERSION}`)}`);
   print(`  ${muted('Get an alert on your phone or tablet when your coding agent needs you.')}`);
+  print(
+    `  ${color.yellow('Preview')} ${muted('· in development; the app is in private testing.')}`,
+  );
   print();
   print(`  ${color.bold('Usage')}  ${command('greatping <command> [options]')}`);
   print();
