@@ -20,6 +20,8 @@ export const LIMITS = {
   reminderDefaultSec: 5 * 60,
   reminderMaxSec: 6 * 3600,
   eventRetentionDays: 90,
+  /** A finished request keeps its text and answer this long, then only its outcome remains. */
+  historyRetentionDays: 7,
   /** While the user is at the computer, an attention alert waits this long before it is sent. */
   presenceDelayDefaultSec: 30,
   presenceDelayMaxSec: 600,
@@ -193,6 +195,13 @@ export interface PingRequest {
   answeredAt: number | null;
   /** Created while the computer's alerts were paused: listed, but no device was alerted. */
   paused?: boolean;
+  /** When the request stopped waiting; absent while it is pending. */
+  finishedAt?: number;
+  /**
+   * Title, body, choices and answer were deleted `historyRetentionDays` after
+   * the request finished; only its outcome and times remain.
+   */
+  contentErased?: boolean;
 }
 
 export type PushData =
@@ -208,7 +217,9 @@ export type PushData =
   /** Another device opened the request; its alert can be cleared here. */
   | { type: 'acked'; requestId: string }
   /** Security notice: the account's devices or computers changed. */
-  | { type: 'security'; event: AccountEventType };
+  | { type: 'security'; event: AccountEventType }
+  /** The account has been inactive and is about to be deleted; opening the app keeps it. */
+  | { type: 'account'; notice: 'inactive' };
 
 export type RequestEvent =
   | { type: 'state'; request: PingRequest }
