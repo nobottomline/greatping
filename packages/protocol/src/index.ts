@@ -219,7 +219,9 @@ export type PushData =
   /** Security notice: the account's devices or computers changed. */
   | { type: 'security'; event: AccountEventType }
   /** The account has been inactive and is about to be deleted; opening the app keeps it. */
-  | { type: 'account'; notice: 'inactive' };
+  | { type: 'account'; notice: 'inactive' }
+  /** Another device deleted the account; this device is signed out. */
+  | { type: 'account'; notice: 'deleted' };
 
 export type RequestEvent =
   | { type: 'state'; request: PingRequest }
