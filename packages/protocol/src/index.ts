@@ -495,6 +495,10 @@ export const resolveRequestBodySchema = z.object({
 
 export interface ListRequestsResponse {
   requests: PingRequest[];
+  /** Pass as `before` to get the next, older page; null on the last page. */
+  nextCursor?: string | null;
+  /** How many requests match in total; on the first page of the history only. */
+  total?: number;
 }
 
 export const answerSchema = z
