@@ -33,7 +33,25 @@ After `login`, `status`, `setup` and `doctor`, and at most hourly from hooks, th
 
 ## Agents
 
-`greatping setup` asks once, then configures every detected agent (`--yes` when not interactive, `setup claude` or `setup codex` for one):
+`greatping setup` opens an interactive picker for detected agents (`setup claude`
+or `setup codex` selects one). Up/Down moves, Enter or Space toggles, and Enter on
+**Continue** saves. Enabled circles are green; disabled circles are dim. Escape
+cancels without writes; Ctrl+C returns 130. Choices reflect installed settings;
+all-off choices persist and unrelated agent hooks are preserved.
+
+After saving alerts and tools, a separate question offers skill setup or **Skip
+for now**. Choosing setup hands agent selection, installation method and final
+confirmation to `npx skills add nobottomline/greatping --skill greatping --global`.
+Skipping leaves existing skills installed; `--no-skill` skips this step entirely.
+The step also appears when alert settings are already up to date. npm's runner
+fetch is accepted automatically; the skills installer keeps its own prompts.
+It uses the npm/Node runtime on PATH (the current skills runner requires Node.js
+22.20 or later). Its output goes to stderr, keeping GreatPing's stdout contract.
+A failed skill installation leaves saved alert settings intact and provides a
+retry command. `setup --yes` retains the existing bundled, offline skill install
+for scripts and does not run npx.
+
+Agent behavior:
 
 - **Claude Code**: hooks alert when it asks a question, needs a permission (not when auto mode decides) or an MCP server asks for input, and resolve the alert when the prompt closes, the user types, or the turn ends. `--finished` also alerts when an interactive session finishes a turn.
 - **Codex**: hooks alert when it finishes a turn and waits for you, and resolve when you reply. Codex runs new hooks only after you trust them in `/hooks`. `setup` also registers the MCP tools through `codex mcp add`, because the Codex sandbox usually blocks network access for shell commands.
@@ -45,4 +63,32 @@ Alerts are generic: nothing from a prompt leaves the computer, and GreatPing nev
 
 `greatping mcp` starts a local stdio MCP server with `ask_user` and `notify` tools, using the same paired machine credential; `setup codex` registers it.
 
-The default API is `https://greatping-api-dev.ueldo343.workers.dev`. Override it with `--server <url>` or `GREATPING_API_URL`; the phone app must target the same environment before pairing. Set `GREATPING_DEBUG=1` to print stack traces for unexpected errors.
+## Service and preview access
+
+The CLI connects automatically to the GreatPing service. There is no server URL
+option or environment override. The current release uses the same development
+service as the mobile preview; switching to the production domain is a separate,
+coordinated release. Install the private-test mobile app before running `login`.
+The app is not yet available in the App Store or Google Play.
+
+An existing pairing keeps its credential bound to the server that issued it.
+Credentials from another or unknown environment are rejected locally; they are
+never silently sent to this release's service. Run `logout`, then `login` to pair
+again when moving between environments. Editing the saved server cannot redirect
+a credential to an arbitrary host, and HTTP redirects are refused.
+
+The service address is public information, not a credential. Access to account
+data and sending alerts require individual, revocable device or computer tokens.
+An installed CLI does not grant access to another account. The service and mobile
+apps are not included in this open-source distribution. Set `GREATPING_DEBUG=1`
+to print unexpected-error stack traces.
+
+## CLI verification
+
+Run `pnpm -F greatping typecheck`, `pnpm -F greatping test` (Node.js 24 for the
+source loader), `pnpm -F greatping build`, and `pnpm -F greatping test:interactive`
+(Python 3 on macOS/Linux). The PTY smoke suite exercises the built executable in
+an isolated temporary home, including Enter/Continue, color, cancel/signals,
+repeat setup, a narrow terminal, all-off preferences and the npx handoff. Its
+Codex and npx fixtures never contact the hosted service or install real skills.
+CI runs the bundled PTY suite on Node.js 20 and the source tests on Node.js 24.

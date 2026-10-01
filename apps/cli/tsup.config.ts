@@ -15,7 +15,7 @@ export default defineConfig({
   banner: {
     js: '#!/usr/bin/env node',
   },
-  // The agent skill ships next to the CLI, so `greatping setup` works offline.
+  // The agent skill ships next to the CLI, so scripted `greatping setup --yes` can install it offline.
   async onSuccess() {
     copyFileSync('../../skills/greatping/SKILL.md', 'dist/SKILL.md');
   },

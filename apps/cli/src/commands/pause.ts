@@ -5,8 +5,8 @@ import { clock, parseDuration } from '../duration';
 import { command, muted, ui } from '../ui';
 import { UsageError } from './usage';
 
-function requirePaired(server?: string) {
-  const config = loadConfig(server);
+function requirePaired() {
+  const config = loadConfig();
   if (!isPaired(config)) {
     throw new UsageError(
       null,
@@ -21,7 +21,7 @@ function requirePaired(server?: string) {
  * Pauses this computer's alerts on every device. Requests still reach the
  * app's inbox; nothing is pushed until the pause ends or `greatping resume`.
  */
-export async function pause(duration: string | undefined, options: { server?: string }) {
+export async function pause(duration: string | undefined) {
   const seconds = parseDuration(duration ?? '1h');
   if (seconds === null) {
     throw new UsageError(
@@ -32,7 +32,7 @@ export async function pause(duration: string | undefined, options: { server?: st
   if (seconds < 60 || seconds > LIMITS.pauseMaxSec) {
     throw new UsageError('pause', 'Pause for at least a minute and at most 7 days.');
   }
-  const config = requirePaired(options.server);
+  const config = requirePaired();
   const res = await api<PauseMachineResponse>(config, 'PUT', '/machine/me/pause', {
     body: { until: Date.now() + seconds * 1000 },
   });
@@ -43,8 +43,8 @@ export async function pause(duration: string | undefined, options: { server?: st
   return 0;
 }
 
-export async function resume(options: { server?: string }) {
-  const config = requirePaired(options.server);
+export async function resume() {
+  const config = requirePaired();
   await api<PauseMachineResponse>(config, 'PUT', '/machine/me/pause', { body: { until: null } });
   ui.success('Alerts from this computer are on.');
   return 0;

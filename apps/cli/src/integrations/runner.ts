@@ -3,7 +3,7 @@ import { LIMITS } from '@greatping/protocol';
 import { api } from '../api';
 import { type Config, isPaired, loadConfig } from '../config';
 import { reportMachine } from '../report';
-import { claudeSteps, codexSteps, type HookInput, type HookStep } from './events';
+import { type ClaudeAlert, claudeSteps, codexSteps, type HookInput, type HookStep } from './events';
 import { isAway } from './presence';
 import {
   findAlert,
@@ -100,7 +100,10 @@ export async function runSteps(
  * Entry point a host runs for each hook event. It stays silent and never
  * fails: an alert problem must not affect the host or its prompt.
  */
-export async function runHook(host: HostId, options: { finished: boolean }): Promise<number> {
+export async function runHook(
+  host: HostId,
+  options: { finished: boolean; alerts?: ClaudeAlert[] },
+): Promise<number> {
   try {
     const input = await readHookInput();
     if (!input || input.hook_event_name === PROBE_EVENT) return 0;
@@ -109,7 +112,11 @@ export async function runHook(host: HostId, options: { finished: boolean }): Pro
     if (process.env.GREATPING_DISABLE && process.env.GREATPING_DISABLE !== '0') return 0;
     const steps =
       host === 'claude'
-        ? claudeSteps(input, { finished: options.finished, interactive: claudeInteractive() })
+        ? claudeSteps(input, {
+            finished: options.finished,
+            interactive: claudeInteractive(),
+            ...(options.alerts ? { alerts: options.alerts } : {}),
+          })
         : codexSteps(input, { finished: options.finished, interactive: true });
     const config = loadConfig();
     if (steps.length > 0 && input.session_id) {

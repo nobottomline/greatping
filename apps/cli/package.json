@@ -36,7 +36,8 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-transform-types --no-warnings --import ./test/ts-resolve.mjs --test test/*.test.mjs"
+    "test": "node --experimental-transform-types --no-warnings --import ./test/ts-resolve.mjs --test test/*.test.mjs",
+    "test:interactive": "python3 test/interactive-smoke.py"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",

@@ -6,10 +6,15 @@ Issues and pull requests are welcome. Before a larger change, open an issue to d
 
 ```bash
 pnpm install
-pnpm typecheck && pnpm test && pnpm build
+pnpm lint && pnpm typecheck && pnpm test && pnpm build
+pnpm -F greatping test:interactive
 node apps/cli/dist/index.js --help
 ```
 
 ## Releases
 
 A release is cut automatically when `apps/cli/package.json` gets a new version: the release workflow runs the checks, tags `v<version>`, and attaches the npm package to a GitHub release (`greatping.tgz` always points at the latest one).
+
+Updating the public source without changing the CLI version does not replace an
+existing npm package. npm publication is staged by trusted publishing and requires
+maintainer approval. Service and mobile deployments are separate delivery steps.

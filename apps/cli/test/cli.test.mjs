@@ -1,9 +1,17 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { loadConfig, saveConfig } from '../src/config.ts';
+import { api } from '../src/api.ts';
+import {
+  configPath,
+  DEFAULT_API_URL,
+  loadConfig,
+  requireServer,
+  saveConfig,
+} from '../src/config.ts';
 import { ago, parseDuration } from '../src/duration.ts';
 import { renderQr } from '../src/qr.ts';
 
@@ -32,14 +40,35 @@ function withHome(run) {
   }
 }
 
-test('server precedence: flag, environment, saved config, default', () => {
+test('the service is built in; old overrides and unpaired config cannot select a host', () => {
   withHome(() => {
-    assert.match(loadConfig().apiUrl, /^https:\/\//);
-    saveConfig({ apiUrl: 'https://saved.example/' });
-    assert.equal(loadConfig().apiUrl, 'https://saved.example');
-    process.env.GREATPING_API_URL = 'http://env.example';
-    assert.equal(loadConfig().apiUrl, 'http://env.example');
-    assert.equal(loadConfig('http://flag.example//').apiUrl, 'http://flag.example');
+    assert.equal(DEFAULT_API_URL, 'https://greatping-api-dev.ueldo343.workers.dev');
+    assert.equal(loadConfig().apiUrl, DEFAULT_API_URL);
+    saveConfig({ apiUrl: 'https://other.example/' });
+    process.env.GREATPING_API_URL = 'https://override.example';
+    assert.equal(loadConfig().apiUrl, DEFAULT_API_URL);
+    requireServer(loadConfig());
+  });
+});
+
+test('existing pairings keep their issuer; unrelated or missing origins cannot redirect credentials', () => {
+  withHome(() => {
+    const credential = { machineId: 'mac_1', machineToken: 'test-token' };
+    saveConfig({ ...credential, apiUrl: `${DEFAULT_API_URL}/` });
+    assert.deepEqual(loadConfig(), { ...credential, apiUrl: DEFAULT_API_URL });
+    requireServer(loadConfig());
+    for (const apiUrl of ['https://other.example', '', undefined]) {
+      saveConfig({ ...credential, apiUrl });
+      assert.equal(loadConfig().machineToken, credential.machineToken);
+      assert.throws(() => requireServer(loadConfig()), /different or unknown/);
+    }
+    saveConfig({ apiUrl: DEFAULT_API_URL });
+    assert.equal(loadConfig().machineToken, undefined);
+    for (const value of ['null', '[]', '42', '{bad']) {
+      writeFileSync(configPath(), value);
+      assert.equal(loadConfig().apiUrl, DEFAULT_API_URL);
+      assert.equal(loadConfig().machineToken, undefined);
+    }
   });
 });
 
@@ -90,4 +119,74 @@ test('describes the computer without secrets', async () => {
     ),
     [],
   );
+});
+
+test('non-service destinations are refused before fetch', async () => {
+  const originalFetch = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    throw new Error('Unexpected network call');
+  };
+  try {
+    for (const apiUrl of [
+      '',
+      'not-a-url',
+      'file:///tmp/server',
+      'https://other.example',
+      `${DEFAULT_API_URL}/other`,
+      `${DEFAULT_API_URL}@other.example`,
+    ]) {
+      await assert.rejects(
+        api({ apiUrl, machineId: 'test', machineToken: 'test' }, 'POST', '/pair/start'),
+      );
+    }
+    assert.equal(requests, 0);
+    requireServer({ apiUrl: DEFAULT_API_URL });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('API requests use the service credential and refuse redirects', async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+  try {
+    await api({ apiUrl: DEFAULT_API_URL, machineToken: 'test-token' }, 'GET', '/machine/me');
+    assert.equal(calls[0].url, `${DEFAULT_API_URL}/v1/machine/me`);
+    assert.equal(calls[0].options.headers.authorization, 'Bearer test-token');
+    assert.equal(calls[0].options.redirect, 'error');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('a real redirect response cannot forward a credential or trigger a second request', async () => {
+  const calls = [];
+  const relay = createServer((request, response) => {
+    calls.push(request.url);
+    response.writeHead(302, { location: '/credential-target' });
+    response.end();
+  });
+  await new Promise((resolve) => relay.listen(0, '127.0.0.1', resolve));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (url, options) =>
+    originalFetch(
+      url.replace(DEFAULT_API_URL, `http://127.0.0.1:${relay.address().port}`),
+      options,
+    );
+  try {
+    await assert.rejects(
+      api({ apiUrl: DEFAULT_API_URL, machineToken: 'test-token' }, 'GET', '/machine/me'),
+      (error) => error.code === 'network',
+    );
+    assert.deepEqual(calls, ['/v1/machine/me']);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await new Promise((resolve) => relay.close(resolve));
+  }
 });

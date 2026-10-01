@@ -13,11 +13,13 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { DEFAULT_API_URL } from '../src/config.ts';
 import { claudeSteps, codexSteps } from '../src/integrations/events.ts';
 import {
   HOSTS,
   inspectHooks,
   installHooks,
+  selectedAlerts,
   uninstallHooks,
 } from '../src/integrations/host-hooks.ts';
 import { isVersionedPath, parseShellCommand, shellCommand } from '../src/integrations/launcher.ts';
@@ -418,8 +420,13 @@ test('hook steps open, retry and resolve alerts on the server', async () => {
       }
       return { id: 'req_1', status: 'pending' };
     });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (url, options) => {
+      assert.ok(url.startsWith(`${DEFAULT_API_URL}/v1/`));
+      return originalFetch(url.replace(DEFAULT_API_URL, server.url), options);
+    };
     try {
-      const config = { apiUrl: server.url, machineId: 'm', machineToken: 't' };
+      const config = { apiUrl: DEFAULT_API_URL, machineId: 'm', machineToken: 't' };
       const question = claudeSteps(
         {
           hook_event_name: 'PreToolUse',
@@ -442,6 +449,7 @@ test('hook steps open, retry and resolve alerts on the server', async () => {
       assert.equal(resolves[0].body.sourceKey, created.body.sourceKey);
       assert.equal(sessionAlerts('claude', 'sess').length, 0);
     } finally {
+      globalThis.fetch = originalFetch;
       await server.close();
     }
   });
@@ -452,5 +460,81 @@ test('an unpaired computer only forgets local alerts', async () => {
     openAlert('codex', 'x', 'finished');
     await runSteps('codex', 'x', [{ op: 'resolve-session' }], { apiUrl: 'http://127.0.0.1:9' });
     assert.equal(sessionAlerts('codex', 'x').length, 0);
+  });
+});
+
+test('disabled Claude alert types still close previously opened prompts and finished turns', () => {
+  const off = { ...interactive, finished: true, alerts: [] };
+  for (const input of [
+    { hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion' },
+    { hook_event_name: 'PermissionRequest', tool_name: 'Bash' },
+    { hook_event_name: 'Notification', notification_type: 'elicitation_dialog' },
+  ])
+    assert.deepEqual(claudeSteps({ session_id: 's', ...input }, off), []);
+  assert.equal(
+    claudeSteps(
+      {
+        session_id: 's',
+        hook_event_name: 'Notification',
+        notification_type: 'elicitation_response',
+      },
+      off,
+    )[0].op,
+    'resolve',
+  );
+  assert.equal(
+    claudeSteps({ session_id: 's', hook_event_name: 'PostToolUse', tool_name: 'Bash' }, off)[0].op,
+    'resolve',
+  );
+  assert.deepEqual(
+    claudeSteps({ session_id: 's', hook_event_name: 'Stop' }, off).map((step) => step.op),
+    ['resolve-session', 'notify'],
+  );
+});
+
+test('repair preserves a subset of Claude alerts and all cleanup hooks', async () => {
+  await withHome((root) => {
+    const host = HOSTS.claude;
+    const script = join(root, 'greatping.js');
+    writeFileSync(script, '');
+    const launcher = { command: fakeNode(root), args: [script] };
+    installHooks(host, launcher, true, ['permissions']);
+    let settings = JSON.parse(readFileSync(host.settingsPath(), 'utf8'));
+    assert.equal(settings.hooks.PreToolUse, undefined);
+    assert.ok(settings.hooks.PermissionRequest);
+    assert.ok(settings.hooks.Notification, 'Keep notification responses for cleanup');
+    assert.deepEqual(selectedAlerts(host), ['permissions']);
+    assert.equal(inspectHooks(host).status, 'ok');
+    delete settings.hooks.UserPromptSubmit;
+    writeFileSync(host.settingsPath(), JSON.stringify(settings));
+    assert.equal(inspectHooks(host).status, 'outdated');
+    installHooks(host, launcher, true);
+    assert.deepEqual(selectedAlerts(host), ['permissions']);
+    assert.equal(inspectHooks(host).status, 'ok');
+    settings = JSON.parse(readFileSync(host.settingsPath(), 'utf8'));
+    assert.equal(settings.hooks.PreToolUse, undefined);
+    installHooks(host, launcher, true, []);
+    assert.deepEqual(selectedAlerts(host), []);
+    assert.equal(inspectHooks(host).status, 'ok');
+    assert.ok(JSON.parse(readFileSync(host.settingsPath(), 'utf8')).hooks.Stop);
+  });
+});
+
+test('install and uninstall preserve foreign handlers sharing a GreatPing hook group', async () => {
+  await withHome((root) => {
+    const host = HOSTS.claude;
+    const script = join(root, 'greatping.js');
+    writeFileSync(script, '');
+    const launcher = { command: fakeNode(root), args: [script] };
+    installHooks(host, launcher, false);
+    const settings = JSON.parse(readFileSync(host.settingsPath(), 'utf8'));
+    const foreign = { type: 'command', command: 'lint-on-save' };
+    settings.hooks.PostToolUse[0].hooks.push(foreign);
+    writeFileSync(host.settingsPath(), JSON.stringify(settings));
+    installHooks(host, launcher, true, ['questions']);
+    uninstallHooks(host);
+    assert.deepEqual(JSON.parse(readFileSync(host.settingsPath(), 'utf8')).hooks, {
+      PostToolUse: [{ matcher: '.*', hooks: [foreign] }],
+    });
   });
 });

@@ -1,7 +1,7 @@
 import process from 'node:process';
 import type { PairPollResponse, PairStartResponse } from '@greatping/protocol';
 import { api, host } from '../api';
-import { type Config, isPaired, loadConfig, saveConfig } from '../config';
+import { type Config, isPaired, loadConfig, requireServer, saveConfig } from '../config';
 import { HOST_IDS, inspectHost } from '../integrations';
 import { computerName, machinePlatform } from '../machine';
 import { renderQr } from '../qr';
@@ -21,8 +21,9 @@ import {
 } from '../ui';
 import { setup } from './setup';
 
-export async function login(options: { server?: string; name?: string }): Promise<number> {
-  const config = loadConfig(options.server);
+export async function login(options: { name?: string }): Promise<number> {
+  const config = loadConfig();
+  requireServer(config);
   if (isPaired(config)) {
     ui.info(`This computer is already paired ${muted(`(${host(config)})`)}.`);
     ui.next(
@@ -62,7 +63,8 @@ export async function login(options: { server?: string; name?: string }): Promis
   ui.success(`Paired ${strong(name)}. Alerts now reach ${devices}.`);
 
   await reportMachine(config);
-  await offerSetup();
+  const setupResult = await offerSetup();
+  if (setupResult !== 0) return setupResult;
   ui.next(`Try it: ${command('greatping notify "Hello from my computer"')}`);
   print();
   return 0;
@@ -109,27 +111,22 @@ async function waitForApproval(config: Config, start: PairStartResponse): Promis
 }
 
 /** Offers to set up agents that are here but not alerting yet. */
-async function offerSetup(): Promise<void> {
+async function offerSetup(): Promise<number> {
   const pending = HOST_IDS.map(inspectHost).filter(
     (report) => report.detected && report.hooks.status !== 'ok',
   );
-  if (pending.length === 0) return;
+  if (pending.length === 0) return 0;
   const names = pending.map((report) => report.host.name).join(' and ');
   // Never change another tool's settings without asking.
   if (!interactive) {
     ui.next(`Alert your devices when ${names} needs you: ${command('greatping setup')}`);
-    return;
+    return 0;
   }
-  print();
-  if (!(await confirm(`Set up ${names} to alert your devices when it needs you?`, true))) {
-    ui.next(`You can do this later with ${command('greatping setup')}.`);
-    return;
-  }
-  await setup(undefined, { skill: true, remove: false, yes: true });
+  return setup(undefined, { skill: true, remove: false, yes: false });
 }
 
-export async function logout(options: { server?: string; yes?: boolean }): Promise<number> {
-  const config = loadConfig(options.server);
+export async function logout(options: { yes?: boolean }): Promise<number> {
+  const config = loadConfig();
   if (!isPaired(config)) {
     ui.info('This computer is not paired.');
     return 0;

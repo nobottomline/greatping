@@ -2,7 +2,9 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
+import { UsageError } from './commands/usage';
 
+// Keep this aligned with the mobile preview. Production rollout is a separate release.
 export const DEFAULT_API_URL = 'https://greatping-api-dev.ueldo343.workers.dev';
 
 export interface Config {
@@ -24,21 +26,38 @@ export function configPath(): string {
   return join(configDir(), 'config.json');
 }
 
-/** Server precedence: --server flag, GREATPING_API_URL, saved config, default. */
-export function loadConfig(server?: string): Config {
-  let saved: Partial<Config> = {};
+/** The service is built in. A saved URL binds an existing credential to its issuer. */
+export function loadConfig(): Config {
+  let saved: Record<string, unknown> = {};
   try {
-    if (existsSync(configPath())) saved = JSON.parse(readFileSync(configPath(), 'utf-8'));
+    if (existsSync(configPath())) {
+      const value: unknown = JSON.parse(readFileSync(configPath(), 'utf-8'));
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        saved = value as Record<string, unknown>;
+      }
+    }
   } catch {
-    saved = {};
+    // An unreadable config is treated as unpaired; never infer a credential's issuer.
   }
-  const apiUrl = (
-    server ||
-    process.env.GREATPING_API_URL ||
-    saved.apiUrl ||
-    DEFAULT_API_URL
-  ).replace(/\/+$/, '');
-  return { ...saved, apiUrl };
+  const machineId = typeof saved.machineId === 'string' ? saved.machineId : undefined;
+  const machineToken = typeof saved.machineToken === 'string' ? saved.machineToken : undefined;
+  const paired = Boolean(machineId && machineToken);
+  const apiUrl = paired
+    ? typeof saved.apiUrl === 'string'
+      ? saved.apiUrl.trim().replace(/\/+$/, '')
+      : ''
+    : DEFAULT_API_URL;
+  return machineId && machineToken ? { apiUrl, machineId, machineToken } : { apiUrl };
+}
+
+/** Never send an existing credential to another environment or a config-supplied host. */
+export function requireServer(config: Config): void {
+  if (config.apiUrl === DEFAULT_API_URL) return;
+  throw new UsageError(
+    null,
+    'This pairing belongs to a different or unknown GreatPing environment.',
+    'Run greatping logout, then greatping login to pair with this version of GreatPing.',
+  );
 }
 
 /** Writes the config readable only by the current user; it holds the machine token. */

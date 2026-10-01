@@ -30,30 +30,32 @@ interface Command {
   ): Promise<number> | number;
 }
 
-const serverFlag: Options = { server: { type: 'string' } };
-
 const commands: Record<string, Command> = {
   login: {
     usage: 'greatping login [--name <name>]',
     summary: 'Pair this computer with your GreatPing devices',
-    details: ['Shows a QR code and a code to approve in the GreatPing app.'],
-    options: { ...serverFlag, name: { type: 'string' } },
+    details: [
+      'Private preview: the mobile app is not publicly available yet.',
+      'Install the GreatPing test app on your phone before pairing.',
+      'Shows a QR code and a code to approve in the GreatPing app.',
+    ],
+    options: { name: { type: 'string' } },
     flags: [['--name <name>', 'Name shown in the app (default: this computer’s name)']],
-    run: (v) => login({ server: v.server as string, name: v.name as string }),
+    run: (v) => login({ name: v.name as string }),
   },
   logout: {
     usage: 'greatping logout [--yes]',
     summary: 'Unpair this computer',
-    options: { ...serverFlag, yes: { type: 'boolean', short: 'y' } },
+    options: { yes: { type: 'boolean', short: 'y' } },
     flags: [['-y, --yes', 'Skip the confirmation']],
-    run: (v) => logout({ server: v.server as string, yes: Boolean(v.yes) }),
+    run: (v) => logout({ yes: Boolean(v.yes) }),
   },
   status: {
     usage: 'greatping status [--json]',
     summary: 'Show pairing, devices and agent integrations',
-    options: { ...serverFlag, json: { type: 'boolean' } },
+    options: { json: { type: 'boolean' } },
     flags: [['--json', 'Print machine-readable status']],
-    run: (v) => status({ server: v.server as string, json: Boolean(v.json) }),
+    run: (v) => status({ json: Boolean(v.json) }),
   },
   ask: {
     usage: 'greatping ask <question> [--choices a,b] [--timeout 30m] [--json]',
@@ -63,7 +65,6 @@ const commands: Record<string, Command> = {
       `  ${'answer=$(greatping ask "Deploy now?" --choices Yes,No)'}`,
     ],
     options: {
-      ...serverFlag,
       choices: { type: 'string', short: 'c' },
       timeout: { type: 'string', short: 't' },
       json: { type: 'boolean' },
@@ -75,7 +76,6 @@ const commands: Record<string, Command> = {
     ],
     run: (v, p) =>
       ask(p.join(' ') || undefined, {
-        server: v.server as string,
         choices: v.choices as string,
         timeout: v.timeout as string,
         json: Boolean(v.json),
@@ -84,10 +84,9 @@ const commands: Record<string, Command> = {
   notify: {
     usage: 'greatping notify <message> [--title <title>]',
     summary: 'Send an alert to your devices',
-    options: { ...serverFlag, title: { type: 'string' } },
+    options: { title: { type: 'string' } },
     flags: [['--title <title>', 'Bold first line of the alert']],
-    run: (v, p) =>
-      notify(p.join(' ') || undefined, { server: v.server as string, title: v.title as string }),
+    run: (v, p) => notify(p.join(' ') || undefined, { title: v.title as string }),
   },
   setup: {
     usage:
@@ -96,8 +95,9 @@ const commands: Record<string, Command> = {
     details: [
       'Claude Code: alerts when it asks a question or needs a permission, and the',
       'alert clears when the prompt closes. Codex: alerts when it finishes a turn,',
-      'plus the notify and ask_user tools over MCP. Both get the GreatPing skill,',
-      'so you can say "ping me when the deploy is done" or "no pings for an hour".',
+      'plus the notify and ask_user tools over MCP. Choose alerts interactively,',
+      'then optionally install the GreatPing skill with npx skills to say',
+      '"ping me when the deploy is done" or "no pings for an hour".',
       'Alerts are generic; nothing from a prompt leaves this computer.',
     ],
     options: {
@@ -110,7 +110,7 @@ const commands: Record<string, Command> = {
     flags: [
       ['--finished', 'Claude Code: also alert when it finishes a turn'],
       ['--no-finished', 'Turn finished-turn alerts off (Codex: removes its alerts)'],
-      ['--no-skill', 'Do not install the GreatPing skill'],
+      ['--no-skill', 'Skip the separate skill setup step'],
       ['--remove', 'Remove everything GreatPing set up for the agents'],
       ['-y, --yes', 'Skip the confirmation (required when not interactive)'],
     ],
@@ -129,22 +129,22 @@ const commands: Record<string, Command> = {
       'Requests still appear in the app, but no device is alerted until the pause',
       'ends. Durations look like 30m, 2h or 1d. Devices can pause and resume too.',
     ],
-    options: { ...serverFlag },
-    run: (v, p) => pause(p[0], { server: v.server as string }),
+    options: {},
+    run: (_v, p) => pause(p[0]),
   },
   resume: {
     usage: 'greatping resume',
     summary: 'Resume alerts from this computer',
-    options: { ...serverFlag },
-    run: (v) => resume({ server: v.server as string }),
+    options: {},
+    run: () => resume(),
   },
   doctor: {
     usage: 'greatping doctor [--fix]',
     summary: 'Check pairing, alerts and agent integrations',
     details: ['Runs each installed hook once with a test event that sends nothing.'],
-    options: { ...serverFlag, fix: { type: 'boolean' } },
+    options: { fix: { type: 'boolean' } },
     flags: [['--fix', 'Repair hooks and tools that cannot run or are outdated']],
-    run: (v) => doctor({ server: v.server as string, fix: Boolean(v.fix) }),
+    run: (v) => doctor({ fix: Boolean(v.fix) }),
   },
   hooks: {
     usage: 'greatping hooks <install|uninstall|status> [claude|codex] [--finished|--no-finished]',
@@ -172,9 +172,22 @@ const commands: Record<string, Command> = {
     usage: 'greatping hook <claude|codex> [--finished]',
     summary: 'Internal: handle an agent hook event from stdin',
     hidden: true,
-    options: { finished: { type: 'boolean' } },
+    options: { finished: { type: 'boolean' }, alerts: { type: 'string' } },
     run: (v, p) =>
-      p[0] === 'claude' || p[0] === 'codex' ? runHook(p[0], { finished: Boolean(v.finished) }) : 0,
+      p[0] === 'claude' || p[0] === 'codex'
+        ? runHook(p[0], {
+            finished: Boolean(v.finished),
+            ...(typeof v.alerts === 'string'
+              ? {
+                  alerts: v.alerts
+                    .split(',')
+                    .filter((value) =>
+                      ['questions', 'permissions', 'tool-input'].includes(value),
+                    ) as import('./integrations/events').ClaudeAlert[],
+                }
+              : {}),
+          })
+        : 0,
   },
 };
 
@@ -194,7 +207,6 @@ function printHelp(): void {
   for (const [name, c] of visible) print(`    ${command(name.padEnd(width))}  ${c.summary}`);
   print();
   print(`  ${color.bold('Options')}`);
-  print(`    ${command('--server <url>')}  Use another GreatPing server (or GREATPING_API_URL)`);
   print(`    ${command('--no-color')}      Plain output (also NO_COLOR=1)`);
   print(`    ${command('-h, --help')}      Help for a command: greatping <command> --help`);
   print(`    ${command('-v, --version')}   Print the version`);
@@ -213,7 +225,6 @@ function printCommandHelp(name: string, c: Command): void {
     for (const line of c.details) print(`  ${muted(line)}`);
   }
   const flags = [...(c.flags ?? [])];
-  if ('server' in c.options) flags.push(['--server <url>', 'Use another GreatPing server']);
   if (flags.length) {
     print();
     print(`  ${color.bold('Options')}`);

@@ -9,7 +9,7 @@ import { UsageError } from './usage';
 
 export async function ask(
   question: string | undefined,
-  options: { server?: string; choices?: string; timeout?: string; json?: boolean },
+  options: { choices?: string; timeout?: string; json?: boolean },
 ): Promise<number> {
   if (!question?.trim()) throw new UsageError('ask', 'Write the question to send.');
   if (question.length > LIMITS.bodyMaxLength)
@@ -31,7 +31,7 @@ export async function ask(
   if (timeoutSec < 10 || timeoutSec > 86_400)
     throw new UsageError('ask', 'The timeout must be between 10 seconds and 24 hours.');
 
-  const config = requirePairing(options.server);
+  const config = requirePairing();
   const request = await api<PingRequest>(config, 'POST', '/requests', {
     body: { kind: 'ask', body: question.trim(), choices, timeoutSec },
   });
@@ -78,12 +78,12 @@ export async function ask(
 
 export async function notify(
   message: string | undefined,
-  options: { server?: string; title?: string },
+  options: { title?: string },
 ): Promise<number> {
   if (!message?.trim()) throw new UsageError('notify', 'Write the message to send.');
   if (message.length > LIMITS.bodyMaxLength)
     throw new UsageError('notify', `Messages are limited to ${LIMITS.bodyMaxLength} characters.`);
-  const config = requirePairing(options.server);
+  const config = requirePairing();
   const request = await api<PingRequest>(config, 'POST', '/requests', {
     body: {
       kind: 'notify',
@@ -104,8 +104,8 @@ function warnIfPaused(request: PingRequest): void {
   ui.next(muted(`Resume with ${command('greatping resume')}.`));
 }
 
-function requirePairing(server?: string): Config {
-  const config = loadConfig(server);
+function requirePairing(): Config {
+  const config = loadConfig();
   if (!isPaired(config)) {
     throw new UsageError(
       null,

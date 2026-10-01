@@ -8,8 +8,8 @@ import { reportMachine } from '../report';
 import { color, command, muted, print, ui } from '../ui';
 import { hostSummary } from './setup';
 
-export async function status(options: { server?: string; json?: boolean }): Promise<number> {
-  const config = loadConfig(options.server);
+export async function status(options: { json?: boolean }): Promise<number> {
+  const config = loadConfig();
   const claudeReport = inspectHost('claude');
   // Kept for scripts written against earlier versions; `integrations` has the detail.
   const claude =

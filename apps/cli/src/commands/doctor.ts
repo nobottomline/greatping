@@ -4,7 +4,7 @@ import { api, host as serverHost } from '../api';
 import { isPaired, loadConfig } from '../config';
 import { ago, clock } from '../duration';
 import { HOST_IDS, type HostReport, inspectHost } from '../integrations';
-import { installHooks } from '../integrations/host-hooks';
+import { installHooks, selectedAlerts } from '../integrations/host-hooks';
 import { currentLauncher } from '../integrations/launcher';
 import { registerCodexMcp } from '../integrations/mcp';
 import { AWAY_AFTER_SEC, idleSeconds } from '../integrations/presence';
@@ -70,7 +70,12 @@ function hostChecks(report: HostReport, fix: boolean, problems: string[]): Check
         const what =
           host.id === 'codex'
             ? 'when a turn finishes'
-            : `questions and permissions${hooks.finished ? ', finished turns' : ''}`;
+            : [
+                ...selectedAlerts(host).map((value) =>
+                  value === 'tool-input' ? 'tool input' : value,
+                ),
+                ...(hooks.finished ? ['finished responses'] : []),
+              ].join(', ');
         checks.push(['Alerts', ok(`on ${muted(`(${what})`)}`)]);
       }
       checks.push([
@@ -107,9 +112,9 @@ function hostChecks(report: HostReport, fix: boolean, problems: string[]): Check
   return checks;
 }
 
-export async function doctor(options: { server?: string; fix: boolean }): Promise<number> {
+export async function doctor(options: { fix: boolean }): Promise<number> {
   const problems: string[] = [];
-  const config = loadConfig(options.server);
+  const config = loadConfig();
   ui.heading('Doctor');
 
   const general: Check[] = [];

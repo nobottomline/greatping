@@ -28,3 +28,4 @@ jobs:
         with:
           node-version: 20
       - run: node apps/cli/dist/index.js --version
+      - run: pnpm -F greatping test:interactive

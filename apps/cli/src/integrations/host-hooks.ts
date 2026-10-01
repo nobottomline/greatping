@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
+import { CLAUDE_ALERTS, type ClaudeAlert } from './events';
 import { type HookGroup, type HookHandler, hookGroups, readJson, writeJson } from './json-file';
 import {
   isVersionedPath,
@@ -111,6 +112,7 @@ interface OwnHandler {
   command: string;
   args: string[];
   finished: boolean;
+  alerts: ClaudeAlert[];
 }
 
 /** GreatPing's invocation in a handler, or null for anyone else's handler. */
@@ -124,16 +126,62 @@ function ownHandler(host: HostId, handler: unknown): OwnHandler | null {
   const at = parts.indexOf('hook');
   if (at < 0 || parts[at + 1] !== host) return null;
   const [executable = '', ...rest] = parts;
+  const alertFlag = parts.indexOf('--alerts', at + 2);
+  const alerts =
+    alertFlag < 0
+      ? CLAUDE_ALERTS
+      : (parts[alertFlag + 1] ?? '')
+          .split(',')
+          .filter((value): value is ClaudeAlert => CLAUDE_ALERTS.includes(value as ClaudeAlert));
   return {
     command: executable,
     args: rest.slice(0, at - 1),
     finished: parts.slice(at + 2).includes('--finished'),
+    alerts,
   };
 }
 
 function isOwnGroup(host: HostId, group: unknown): boolean {
   const handlers = (group as HookGroup | null)?.hooks;
   return Array.isArray(handlers) && handlers.some((handler) => ownHandler(host, handler));
+}
+
+function removeOwnHandlers(host: HostId, groups: HookGroup[]): HookGroup[] {
+  return groups.flatMap((group) => {
+    if (!isOwnGroup(host, group)) return [group];
+    const hooks = group.hooks.filter((handler) => !ownHandler(host, handler));
+    return hooks.length ? [{ ...group, hooks }] : [];
+  });
+}
+
+export function selectedAlerts(host: HostHooks): ClaudeAlert[] {
+  let groups: Record<string, HookGroup[]>;
+  try {
+    groups = hookGroups(readJson(host.settingsPath()));
+  } catch {
+    return [...CLAUDE_ALERTS];
+  }
+  for (const values of Object.values(groups)) {
+    if (!Array.isArray(values)) continue;
+    for (const group of values) {
+      for (const handler of Array.isArray(group?.hooks) ? group.hooks : []) {
+        const own = ownHandler(host.id, handler);
+        if (own) return own.alerts;
+      }
+    }
+  }
+  return [...CLAUDE_ALERTS];
+}
+
+function selectedEvents(host: HostHooks, alerts: ClaudeAlert[]): HookEvent[] {
+  if (host.id !== 'claude') return host.events;
+  return host.events.filter(({ event }) =>
+    event === 'PreToolUse'
+      ? alerts.includes('questions')
+      : event === 'PermissionRequest'
+        ? alerts.includes('permissions')
+        : true,
+  ); // Notification also closes tool dialogs; keep its cleanup events.
 }
 
 export interface HooksState {
@@ -157,7 +205,8 @@ export function inspectHooks(host: HostHooks): HooksState {
       invocation: null,
     };
   }
-  const found = host.events.map(({ event }) =>
+  const events = selectedEvents(host, selectedAlerts(host));
+  const found = events.map(({ event }) =>
     (Array.isArray(groups[event]) ? groups[event] : [])
       .flatMap((group) => (Array.isArray(group?.hooks) ? group.hooks : []))
       .map((handler) => ownHandler(host.id, handler))
@@ -189,19 +238,33 @@ export function inspectHooks(host: HostHooks): HooksState {
 }
 
 /** Installs or repairs the host's hooks; repeatable and preserves other hooks. */
-export function installHooks(host: HostHooks, launcher: Launcher, finished: boolean): void {
+export function installHooks(
+  host: HostHooks,
+  launcher: Launcher,
+  finished: boolean,
+  alerts?: ClaudeAlert[],
+): void {
   const path = host.settingsPath();
   const settings = readJson(path);
   const groups = { ...hookGroups(settings) };
-  const hookArgs = ['hook', host.id, ...(finished ? ['--finished'] : [])];
+  const selected = alerts ?? selectedAlerts(host);
+  const hookArgs = [
+    'hook',
+    host.id,
+    ...(finished ? ['--finished'] : []),
+    ...(host.id === 'claude' && selected.length !== CLAUDE_ALERTS.length
+      ? ['--alerts', selected.join(',') || 'none']
+      : []),
+  ];
   for (const existing of Object.keys(groups)) {
-    const kept = (Array.isArray(groups[existing]) ? groups[existing] : []).filter(
-      (group) => !isOwnGroup(host.id, group),
+    const kept = removeOwnHandlers(
+      host.id,
+      Array.isArray(groups[existing]) ? groups[existing] : [],
     );
     if (kept.length > 0) groups[existing] = kept;
     else delete groups[existing];
   }
-  for (const { event, matcher, sync } of host.events) {
+  for (const { event, matcher, sync } of selectedEvents(host, selected)) {
     groups[event] = [
       ...(groups[event] ?? []),
       { ...(matcher ? { matcher } : {}), hooks: [host.handler(launcher, hookArgs, sync === true)] },
@@ -219,8 +282,8 @@ export function uninstallHooks(host: HostHooks): boolean {
   let changed = false;
   for (const event of Object.keys(groups)) {
     const all = Array.isArray(groups[event]) ? groups[event] : [];
-    const kept = all.filter((group) => !isOwnGroup(host.id, group));
-    if (kept.length === all.length) continue;
+    const kept = removeOwnHandlers(host.id, all);
+    if (!all.some((group) => isOwnGroup(host.id, group))) continue;
     changed = true;
     if (kept.length > 0) groups[event] = kept;
     else delete groups[event];

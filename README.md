@@ -19,13 +19,17 @@ greatping setup    # Claude Code and Codex alert your devices when they wait
 
 GreatPing never answers or approves anything on your computer; native prompts stay in the agent.
 
+The CLI connects to the GreatPing service automatically; there is no server
+configuration. The preview continues to use the current testing service. An
+existing credential is never moved silently to a different backend.
+
 ## Privacy
 
 Hook alerts carry fixed text only: nothing from a prompt (questions, commands, file names) leaves the computer. Messages you send yourself with `notify` or `ask` pass through the GreatPing service and the push provider, so never put secrets in them. The CLI stores its machine credential in `~/.config/greatping/config.json` (or `%APPDATA%\greatping` on Windows), readable only by you.
 
 ## The skill
 
-The agent skill is in [`skills/greatping`](skills/greatping/SKILL.md). `greatping setup` installs it for Claude Code and Codex; for other agents:
+The agent skill is in [`skills/greatping`](skills/greatping/SKILL.md). `greatping setup` offers skill installation as a separate step through the interactive `npx skills` installer. For other agents:
 
 ```bash
 npx skills add nobottomline/greatping

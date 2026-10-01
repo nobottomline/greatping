@@ -1,4 +1,4 @@
-import type { Config } from './config';
+import { type Config, requireServer } from './config';
 
 /** API failure with the server's error code when there is one. */
 export class ApiError extends Error {
@@ -25,6 +25,7 @@ export async function api<T>(
   path: string,
   options: { body?: unknown; token?: string | null; signal?: AbortSignal } = {},
 ): Promise<T> {
+  requireServer(config);
   const token = options.token === undefined ? config.machineToken : options.token;
   const headers: Record<string, string> = { accept: 'application/json' };
   if (token) headers.authorization = `Bearer ${token}`;
@@ -32,7 +33,8 @@ export async function api<T>(
 
   let response: Response;
   try {
-    const init: RequestInit = { method, headers };
+    // A redirect must not change the destination of a request or its credential.
+    const init: RequestInit = { method, headers, redirect: 'error' };
     if (options.body !== undefined) init.body = JSON.stringify(options.body);
     if (options.signal) init.signal = options.signal;
     response = await fetch(`${config.apiUrl}/v1${path}`, init);

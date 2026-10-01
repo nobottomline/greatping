@@ -30,7 +30,11 @@ export interface HookOptions {
   finished: boolean;
   /** False for scripted runs (`claude -p`, SDK), which nobody watches. */
   interactive: boolean;
+  alerts?: ClaudeAlert[];
 }
+
+export type ClaudeAlert = 'questions' | 'permissions' | 'tool-input';
+export const CLAUDE_ALERTS: ClaudeAlert[] = ['questions', 'permissions', 'tool-input'];
 
 /** Identifies one tool call across the events that open and close its prompt. */
 function toolCorrelation(input: HookInput): string {
@@ -65,7 +69,11 @@ export function claudeSteps(input: HookInput, options: HookOptions): HookStep[] 
   if (!input.session_id) return [];
   switch (event) {
     case 'PreToolUse':
-      if (input.tool_name !== 'AskUserQuestion') return [];
+      if (
+        input.tool_name !== 'AskUserQuestion' ||
+        (options.alerts && !options.alerts.includes('questions'))
+      )
+        return [];
       return [
         {
           op: 'notify',
@@ -75,6 +83,7 @@ export function claudeSteps(input: HookInput, options: HookOptions): HookStep[] 
         },
       ];
     case 'PermissionRequest': {
+      if (options.alerts && !options.alerts.includes('permissions')) return [];
       if (!input.tool_name || input.tool_name === 'AskUserQuestion') return [];
       // Auto mode decides this one itself; the user is not asked.
       const auto = input.permission_context?.auto_response;
@@ -97,6 +106,7 @@ export function claudeSteps(input: HookInput, options: HookOptions): HookStep[] 
         input.notification_type === 'elicitation_dialog' ||
         input.notification_type === 'elicitation_url_dialog'
       ) {
+        if (options.alerts && !options.alerts.includes('tool-input')) return [];
         return [
           {
             op: 'notify',
