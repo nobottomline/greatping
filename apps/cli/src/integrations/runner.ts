@@ -39,11 +39,6 @@ export async function readHookInput(): Promise<HookInput | null> {
   }
 }
 
-/** `claude -p` and SDK runs are scripted; nobody is waiting at a terminal. */
-function claudeInteractive(): boolean {
-  return !(process.env.CLAUDE_CODE_ENTRYPOINT ?? '').startsWith('sdk');
-}
-
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function resolveAlert(config: Config, alert: OpenAlert): Promise<void> {
@@ -114,10 +109,9 @@ export async function runHook(
       host === 'claude'
         ? claudeSteps(input, {
             finished: options.finished,
-            interactive: claudeInteractive(),
             ...(options.alerts ? { alerts: options.alerts } : {}),
           })
-        : codexSteps(input, { finished: options.finished, interactive: true });
+        : codexSteps(input, { finished: options.finished });
     const config = loadConfig();
     if (steps.length > 0 && input.session_id) {
       await runSteps(host, input.session_id, steps, config);

@@ -9,6 +9,7 @@ import { login, logout } from './commands/login';
 import { pause, resume } from './commands/pause';
 import { setup } from './commands/setup';
 import { status } from './commands/status';
+import { uninstall } from './commands/uninstall';
 import { UsageError } from './commands/usage';
 import { runHook } from './integrations/runner';
 import { startMcp } from './mcp';
@@ -82,11 +83,15 @@ const commands: Record<string, Command> = {
       }),
   },
   notify: {
-    usage: 'greatping notify <message> [--title <title>]',
+    usage: 'greatping notify <message> [--title <title>] [--json]',
     summary: 'Send an alert to your devices',
-    options: { title: { type: 'string' } },
-    flags: [['--title <title>', 'Bold first line of the alert']],
-    run: (v, p) => notify(p.join(' ') || undefined, { title: v.title as string }),
+    options: { title: { type: 'string' }, json: { type: 'boolean' } },
+    flags: [
+      ['--title <title>', 'Bold first line of the alert'],
+      ['--json', 'Print requestId and accepted/paused status'],
+    ],
+    run: (v, p) =>
+      notify(p.join(' ') || undefined, { title: v.title as string, json: Boolean(v.json) }),
   },
   setup: {
     usage:
@@ -95,7 +100,7 @@ const commands: Record<string, Command> = {
     details: [
       'Claude Code: alerts when it asks a question or needs a permission, and the',
       'alert clears when the prompt closes. Codex: alerts when it finishes a turn,',
-      'plus the notify and ask_user tools over MCP. Choose alerts interactively,',
+      'plus GreatPing tools over MCP. Choose alerts interactively,',
       'then optionally install the GreatPing skill with npx skills to say',
       '"ping me when the deploy is done" or "no pings for an hour".',
       'Alerts are generic; nothing from a prompt leaves this computer.',
@@ -108,7 +113,7 @@ const commands: Record<string, Command> = {
       yes: { type: 'boolean', short: 'y' },
     },
     flags: [
-      ['--finished', 'Claude Code: also alert when it finishes a turn'],
+      ['--finished', 'Claude Code: also alert when a CLI or SDK turn finishes'],
       ['--no-finished', 'Turn finished-turn alerts off (Codex: removes its alerts)'],
       ['--no-skill', 'Skip the separate skill setup step'],
       ['--remove', 'Remove everything GreatPing set up for the agents'],
@@ -159,9 +164,32 @@ const commands: Record<string, Command> = {
         v.finished ? { finished: true } : v['no-finished'] ? { finished: false } : {},
       ),
   },
+  uninstall: {
+    usage: 'greatping uninstall [--dry-run] [--yes] [--local-only] [--json]',
+    summary: 'Remove GreatPing integrations, pairing and local state',
+    options: {
+      'dry-run': { type: 'boolean' },
+      yes: { type: 'boolean', short: 'y' },
+      'local-only': { type: 'boolean' },
+      json: { type: 'boolean' },
+    },
+    flags: [
+      ['--dry-run', 'Show the removal plan without changes or network access'],
+      ['-y, --yes', 'Confirm removal non-interactively'],
+      ['--local-only', 'Skip server revocation; unpair in the app separately'],
+      ['--json', 'Print a structured plan or removal result'],
+    ],
+    run: (v) =>
+      uninstall({
+        dryRun: Boolean(v['dry-run']),
+        yes: Boolean(v.yes),
+        localOnly: Boolean(v['local-only']),
+        json: Boolean(v.json),
+      }),
+  },
   mcp: {
     usage: 'greatping mcp',
-    summary: 'Serve the ask_user and notify tools over MCP (stdio)',
+    summary: 'Serve notify, ask_user, get_status, pause_alerts and resume_alerts over MCP',
     options: {},
     run: () => {
       startMcp();

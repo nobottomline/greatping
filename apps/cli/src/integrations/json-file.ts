@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import process from 'node:process';
+import { fingerprint, recordAsset } from './ownership';
 
 export type Json = Record<string, unknown>;
 
@@ -15,10 +16,12 @@ export function readJson(path: string): Json {
 }
 
 /** Writes atomically, keeping one backup of the user's original file. */
-export function writeJson(path: string, value: Json): void {
+export function writeJson(path: string, value: Json, options: { backup?: boolean } = {}): void {
   mkdirSync(dirname(path), { recursive: true });
-  if (existsSync(path) && !existsSync(`${path}.greatping-backup`)) {
-    writeFileSync(`${path}.greatping-backup`, readFileSync(path), { mode: 0o600 });
+  if (options.backup !== false && existsSync(path) && !existsSync(`${path}.greatping-backup`)) {
+    const backup = `${path}.greatping-backup`;
+    writeFileSync(backup, readFileSync(path), { mode: 0o600 });
+    recordAsset({ kind: 'backup', path: backup, fingerprint: fingerprint(backup) });
   }
   const temp = `${path}.${process.pid}.tmp`;
   writeFileSync(temp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });

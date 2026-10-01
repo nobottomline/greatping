@@ -1,9 +1,10 @@
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import process from 'node:process';
 import { findOnPath, type Launcher, launcherProblem } from './launcher';
+import { forgetAsset, ownedAssets, recordAsset } from './ownership';
 import type { HostId } from './state';
 
 /**
@@ -17,7 +18,7 @@ export interface McpState {
   problem: string | null;
 }
 
-function codexConfig(): string {
+export function codexConfig(): string {
   return join(process.env.CODEX_HOME ?? join(homedir(), '.codex'), 'config.toml');
 }
 
@@ -61,24 +62,55 @@ export function inspectMcp(host: HostId): McpState {
 export function registerCodexMcp(launcher: Launcher): string | null {
   const codex = findOnPath('codex');
   if (!codex) return 'The codex command is not on PATH.';
-  if (inspectMcp('codex').registered) {
-    spawnSync(codex, ['mcp', 'remove', 'greatping'], { stdio: 'ignore', timeout: 15_000 });
-  }
+  if (inspectMcp('codex').registered && !unregisterCodexMcp())
+    return 'Could not remove the existing GreatPing MCP registration.';
   const result = spawnSync(
     codex,
     ['mcp', 'add', 'greatping', '--', launcher.command, ...launcher.args, 'mcp'],
     { encoding: 'utf8', timeout: 15_000 },
   );
+  if (result.status === 0)
+    recordAsset({
+      kind: 'mcp',
+      path: codexConfig(),
+      host: 'codex',
+      launcher: { command: launcher.command, args: [...launcher.args, 'mcp'] },
+    });
   return result.status === 0
     ? null
     : (result.stderr || result.stdout || 'codex mcp add failed.').trim();
 }
 
-export function unregisterCodexMcp(): boolean {
-  const codex = findOnPath('codex');
-  if (!codex || !inspectMcp('codex').registered) return false;
+export function mcpInvocationOwned(command: string, args: string[], path: string): boolean {
+  const recorded = ownedAssets().find(
+    (asset) => asset.kind === 'mcp' && asset.path === path,
+  )?.launcher;
   return (
-    spawnSync(codex, ['mcp', 'remove', 'greatping'], { stdio: 'ignore', timeout: 15_000 })
-      .status === 0
+    Boolean(
+      recorded &&
+        recorded.command === command &&
+        JSON.stringify(recorded.args) === JSON.stringify(args),
+    ) ||
+    (/^greatping(?:\.(?:cmd|exe))?$/.test(basename(command)) && args.includes('mcp')) ||
+    (args.includes('mcp') && args.some((arg) => /(?:^|[/\\])greatping(?:[/\\]|$)/.test(arg)))
   );
+}
+
+export function unregisterCodexMcp(path = codexConfig()): boolean {
+  if (!existsSync(path) || !codexMcpServer(readFileSync(path, 'utf8'))) {
+    forgetAsset('mcp', path);
+    return true;
+  }
+  const server = codexMcpServer(readFileSync(path, 'utf8'));
+  if (!server || !mcpInvocationOwned(server.command, server.args, path)) return false;
+  const codex = findOnPath('codex');
+  if (!codex) return false;
+  const ok =
+    spawnSync(codex, ['mcp', 'remove', 'greatping'], {
+      stdio: 'ignore',
+      timeout: 15000,
+      env: { ...process.env, CODEX_HOME: dirname(path) },
+    }).status === 0 && !codexMcpServer(readFileSync(path, 'utf8'));
+  if (ok) forgetAsset('mcp', path);
+  return ok;
 }

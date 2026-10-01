@@ -3,6 +3,7 @@ import { loadConfig } from '../config';
 import { reportMachine } from '../report';
 import { pickSetup } from '../setup-picker';
 import { command, muted, print, ui } from '../ui';
+import { recordManagedSkill, SKILLS_RUNNER } from './managed-skills';
 import type { HostId } from './state';
 
 /** Hand skill selection and installation to the upstream skills CLI. */
@@ -36,7 +37,7 @@ export async function setupSkills(only: HostId | null): Promise<number> {
   }
   const args = [
     '--yes',
-    'skills',
+    SKILLS_RUNNER,
     'add',
     'nobottomline/greatping',
     '--skill',
@@ -77,6 +78,8 @@ export async function setupSkills(only: HostId | null): Promise<number> {
       `Try again with ${command('npx skills add nobottomline/greatping --skill greatping --global')}.`,
     );
   }
+  // Reconcile even after a partial install or cancellation.
+  recordManagedSkill();
   await reportMachine(loadConfig());
   return code;
 }

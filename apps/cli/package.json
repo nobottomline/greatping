@@ -36,7 +36,7 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-transform-types --no-warnings --import ./test/ts-resolve.mjs --test test/*.test.mjs",
+    "test": "pnpm build && node --experimental-transform-types --no-warnings --import ./test/ts-resolve.mjs --test test/*.test.mjs",
     "test:interactive": "python3 test/interactive-smoke.py"
   },
   "dependencies": {

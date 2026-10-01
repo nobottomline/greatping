@@ -35,7 +35,7 @@ import {
   touchHeartbeat,
 } from '../src/integrations/state.ts';
 
-const interactive = { finished: false, interactive: true };
+const defaultOptions = { finished: false };
 
 /** A stand-in for a Node binary at a version-independent path. */
 function fakeNode(root) {
@@ -76,11 +76,11 @@ test('Claude question and permission alerts are generic and close with their pro
     tool_use_id: 't1',
     tool_input: { questions: [{ question: 'Which secret stack?' }] },
   };
-  const [open] = claudeSteps(question, interactive);
+  const [open] = claudeSteps(question, defaultOptions);
   assert.equal(open.op, 'notify');
   // Only title and body reach the server; the correlation is hashed locally.
   assert.doesNotMatch(`${open.title} ${open.body}`, /secret stack/);
-  const [close] = claudeSteps({ ...question, hook_event_name: 'PostToolUse' }, interactive);
+  const [close] = claudeSteps({ ...question, hook_event_name: 'PostToolUse' }, defaultOptions);
   assert.deepEqual(close, { op: 'resolve', correlation: open.correlation });
 
   const permission = {
@@ -89,16 +89,19 @@ test('Claude question and permission alerts are generic and close with their pro
     tool_name: 'Bash',
     tool_input: { command: 'rm -rf build' },
   };
-  const [ask] = claudeSteps(permission, interactive);
+  const [ask] = claudeSteps(permission, defaultOptions);
   assert.equal(ask.op, 'notify');
   assert.doesNotMatch(`${ask.title} ${ask.body}`, /rm -rf/);
   // The tool result gains an ID the permission request may not have had.
   const [done] = claudeSteps(
     { ...permission, hook_event_name: 'PostToolUseFailure', tool_use_id: 'x' },
-    interactive,
+    defaultOptions,
   );
   assert.equal(done.correlation, ask.correlation);
-  const [denied] = claudeSteps({ ...permission, hook_event_name: 'PermissionDenied' }, interactive);
+  const [denied] = claudeSteps(
+    { ...permission, hook_event_name: 'PermissionDenied' },
+    defaultOptions,
+  );
   assert.equal(denied.correlation, ask.correlation);
 });
 
@@ -113,7 +116,7 @@ test('auto mode decisions and unrelated tools do not alert', () => {
           tool_input: {},
           permission_context: { auto_response },
         },
-        interactive,
+        defaultOptions,
       ),
       [],
     );
@@ -127,61 +130,60 @@ test('auto mode decisions and unrelated tools do not alert', () => {
         tool_input: {},
         permission_context: { auto_response: 'defer' },
       },
-      interactive,
+      defaultOptions,
     )[0].op,
     'notify',
   );
   assert.deepEqual(
-    claudeSteps({ hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'Bash' }, interactive),
+    claudeSteps(
+      { hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'Bash' },
+      defaultOptions,
+    ),
     [],
   );
-  assert.deepEqual(claudeSteps({ hook_event_name: 'Stop' }, interactive), []);
+  assert.deepEqual(claudeSteps({ hook_event_name: 'Stop' }, defaultOptions), []);
 });
 
 test('MCP input dialogs alert and clear', () => {
   const [open] = claudeSteps(
     { hook_event_name: 'Notification', session_id: 's', notification_type: 'elicitation_dialog' },
-    interactive,
+    defaultOptions,
   );
   const [close] = claudeSteps(
     { hook_event_name: 'Notification', session_id: 's', notification_type: 'elicitation_response' },
-    interactive,
+    defaultOptions,
   );
   assert.equal(open.op, 'notify');
   assert.deepEqual(close, { op: 'resolve', correlation: open.correlation });
   assert.deepEqual(
     claudeSteps(
       { hook_event_name: 'Notification', session_id: 's', notification_type: 'idle_prompt' },
-      interactive,
+      defaultOptions,
     ),
     [],
   );
 });
 
-test('a finished turn clears the session and alerts only when asked and interactive', () => {
+test('a finished turn clears the session and alerts only with explicit opt-in', () => {
   const stop = { hook_event_name: 'Stop', session_id: 's' };
-  assert.deepEqual(claudeSteps(stop, interactive), [{ op: 'resolve-session' }]);
-  const finished = claudeSteps(stop, { finished: true, interactive: true });
+  assert.deepEqual(claudeSteps(stop, defaultOptions), [{ op: 'resolve-session' }]);
+  const finished = claudeSteps(stop, { finished: true });
   assert.deepEqual(
     finished.map((step) => step.op),
     ['resolve-session', 'notify'],
   );
-  assert.deepEqual(claudeSteps(stop, { finished: true, interactive: false }), [
+  assert.deepEqual(claudeSteps({ ...stop, stop_hook_active: true }, { finished: true }), [
     { op: 'resolve-session' },
   ]);
-  assert.deepEqual(
-    claudeSteps({ ...stop, stop_hook_active: true }, { finished: true, interactive: true }),
-    [{ op: 'resolve-session' }],
-  );
   for (const event of ['UserPromptSubmit', 'SessionEnd']) {
-    assert.deepEqual(claudeSteps({ hook_event_name: event, session_id: 's' }, interactive), [
+    assert.deepEqual(claudeSteps({ hook_event_name: event, session_id: 's' }, defaultOptions), [
       { op: 'resolve-session' },
     ]);
   }
 });
 
 test('Codex alerts at the end of a turn and clears when the user is back', () => {
-  const on = { finished: true, interactive: true };
+  const on = { finished: true };
   const steps = codexSteps({ hook_event_name: 'Stop', session_id: 'c' }, on);
   assert.deepEqual(
     steps.map((step) => step.op),
@@ -243,12 +245,22 @@ test('Claude hooks install idempotently, keep other hooks and report their state
     const handler = settings.hooks.PermissionRequest[0].hooks[0];
     assert.deepEqual(handler.args, [script, 'hook', 'claude', '--finished']);
     assert.equal(handler.async, true);
+    assert.equal(settings.hooks.Stop[0].hooks[0].async, undefined);
+    assert.equal(settings.hooks.SessionEnd[0].hooks[0].async, undefined);
     assert.deepEqual(inspectHooks(host), {
       status: 'ok',
       finished: true,
       problem: null,
       invocation: { command: node, args: [script] },
     });
+
+    // An async Stop can be killed when a single-turn SDK process exits.
+    settings.hooks.Stop[0].hooks[0].async = true;
+    writeFileSync(path, JSON.stringify(settings));
+    assert.equal(inspectHooks(host).status, 'outdated');
+    installHooks(host, launcher, true);
+    assert.equal(inspectHooks(host).status, 'ok');
+    assert.equal(JSON.parse(readFileSync(path, 'utf8')).hooks.Stop[0].hooks[0].async, undefined);
 
     // A hook set from an older GreatPing is missing newer events.
     delete settings.hooks.Stop;
@@ -434,7 +446,7 @@ test('hook steps open, retry and resolve alerts on the server', async () => {
           tool_name: 'AskUserQuestion',
           tool_use_id: 'q1',
         },
-        interactive,
+        defaultOptions,
       );
       await runSteps('claude', 'sess', question, config);
       const created = server.calls.find((c) => c.path === '/v1/requests');
@@ -464,7 +476,7 @@ test('an unpaired computer only forgets local alerts', async () => {
 });
 
 test('disabled Claude alert types still close previously opened prompts and finished turns', () => {
-  const off = { ...interactive, finished: true, alerts: [] };
+  const off = { ...defaultOptions, finished: true, alerts: [] };
   for (const input of [
     { hook_event_name: 'PreToolUse', tool_name: 'AskUserQuestion' },
     { hook_event_name: 'PermissionRequest', tool_name: 'Bash' },

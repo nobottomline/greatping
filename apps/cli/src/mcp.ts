@@ -1,145 +1,197 @@
-import { spawn } from 'node:child_process';
-import process from 'node:process';
 import { LIMITS } from '@greatping/protocol';
 import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
+import { ApiError } from './api';
+import { askQuestion, changePause, getAgentStatus, sendNotice } from './operations';
 import { VERSION } from './version';
 
-interface CommandResult {
-  code: number | null;
-  stdout: string;
-  stderr: string;
+const errorSchema = z.object({ status: z.literal('error'), code: z.string(), message: z.string() });
+function failure(error: unknown) {
+  const message =
+    error instanceof Error ? error.message : 'GreatPing could not complete the operation.';
+  return {
+    content: [{ type: 'text' as const, text: message }],
+    structuredContent: {
+      status: 'error' as const,
+      code: error instanceof ApiError ? error.code : 'operation_failed',
+      message,
+    },
+    isError: true,
+  };
 }
-
-function runCli(args: string[], signal: AbortSignal): Promise<CommandResult> {
-  if (signal.aborted) return Promise.reject(new Error('Request cancelled.'));
-  const cliPath = process.argv[1];
-  if (!cliPath) return Promise.reject(new Error('GreatPing executable path is unavailable.'));
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [cliPath, ...args], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    const onAbort = () => child.kill('SIGINT');
-    signal.addEventListener('abort', onAbort, { once: true });
-    if (signal.aborted) onAbort();
-
-    child.stdout.setEncoding('utf8');
-    child.stderr.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      stdout = (stdout + chunk).slice(-65536);
-    });
-    child.stderr.on('data', (chunk: string) => {
-      stderr = (stderr + chunk).slice(-65536);
-    });
-
-    const finish = (result?: CommandResult, error?: Error) => {
-      if (settled) return;
-      settled = true;
-      signal.removeEventListener('abort', onAbort);
-      if (error) reject(error);
-      else if (result) resolve(result);
-    };
-    child.once('error', (error) => finish(undefined, error));
-    child.once('close', (code) => finish({ code, stdout, stderr }));
-  });
+function result<T extends Record<string, unknown>>(value: T, text: string, isError = false) {
+  return {
+    content: [{ type: 'text' as const, text }],
+    structuredContent: value,
+    ...(isError ? { isError: true } : {}),
+  };
 }
+const mutating = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: true,
+};
 
-function failure(message: string) {
-  return { content: [{ type: 'text' as const, text: message }], isError: true };
+export function createMcpServer(): McpServer {
+  const server = new McpServer(
+    { name: 'greatping', version: VERSION },
+    {
+      instructions:
+        'GreatPing sends phone alerts and separate phone questions. Native host questions and approvals stay in the host. Installed hooks already alert for native prompts; do not duplicate those alerts. Use notify for requested outcome alerts, or a generic native-prompt alert only when automatic hooks are unavailable. Use ask_user only when the user explicitly wants to answer a separate GreatPing question on a device. Pause or resume alerts only at the user’s request. Never include secrets, credentials, private file contents or code in messages. Installation, pairing, repair and removal are managed through the CLI.',
+    },
+  );
+  server.registerTool(
+    'notify',
+    {
+      description:
+        'Send a requested alert to the paired devices. Omit message for a generic attention alert. Does not answer or approve native host prompts. Do not duplicate installed automatic hooks.',
+      inputSchema: z.object({
+        message: z.string().trim().min(1).max(LIMITS.bodyMaxLength).optional(),
+        title: z.string().trim().min(1).max(100).optional(),
+      }),
+      outputSchema: z.union([
+        z.object({ requestId: z.string(), status: z.enum(['accepted', 'paused']) }),
+        errorSchema,
+      ]),
+      annotations: mutating,
+    },
+    async ({ message, title }, ctx) => {
+      try {
+        const value = await sendNotice(
+          message ?? 'Agent needs your attention. Please return to your computer.',
+          title,
+          ctx.mcpReq.signal,
+        );
+        return result(
+          { ...value },
+          value.status === 'paused'
+            ? 'The notice is in the app, but alerts from this computer are paused.'
+            : 'GreatPing accepted the notice. Delivery to a device is not yet confirmed.',
+        );
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    'ask_user',
+    {
+      description:
+        'Ask a separate GreatPing question on paired devices and wait for its answer. Use only when the user explicitly wants a phone question. Does not answer native host questions or approvals.',
+      inputSchema: z.object({
+        question: z.string().trim().min(1).max(LIMITS.bodyMaxLength),
+        choices: z
+          .array(z.string().trim().min(1).max(LIMITS.choiceMaxLength))
+          .max(LIMITS.choicesMax)
+          .optional(),
+        timeoutSeconds: z.number().int().min(10).max(86400).default(LIMITS.timeoutDefaultSec),
+      }),
+      outputSchema: z.union([
+        z.object({
+          requestId: z.string(),
+          status: z.enum(['answered', 'expired', 'cancelled', 'resolved']),
+          paused: z.boolean(),
+          answer: z
+            .object({ choice: z.string().optional(), text: z.string().optional() })
+            .optional(),
+        }),
+        errorSchema,
+      ]),
+      annotations: mutating,
+    },
+    async ({ question, choices, timeoutSeconds }, ctx) => {
+      try {
+        const value = await askQuestion(question, choices ?? [], timeoutSeconds, {
+          signal: ctx.mcpReq.signal,
+        });
+        return result(
+          { ...value },
+          value.answer?.choice ?? value.answer?.text ?? `The question was ${value.status}.`,
+          value.status !== 'answered',
+        );
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    'get_status',
+    {
+      description:
+        'Read this computer’s GreatPing pairing, connection, pause, device count and agent integrations. Does not send alerts or update settings. Unreachable means the live pause and device count are unknown.',
+      inputSchema: z.object({}),
+      outputSchema: z.union([
+        z.object({
+          paired: z.boolean(),
+          connection: z.enum(['unpaired', 'connected', 'revoked', 'unreachable']),
+          alertsPausedUntil: z.number().nullable(),
+          deviceCount: z.number().nullable(),
+          integrations: z.array(
+            z.object({
+              id: z.string(),
+              hooks: z.enum(['ok', 'broken', 'off']),
+              finished: z.boolean(),
+              mcp: z.boolean(),
+              skill: z.boolean(),
+              lastHookAt: z.number().nullable(),
+            }),
+          ),
+        }),
+        errorSchema,
+      ]),
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+    },
+    async (_args, ctx) => {
+      try {
+        const value = await getAgentStatus(ctx.mcpReq.signal);
+        return result({ ...value }, `GreatPing connection: ${value.connection}.`);
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    'pause_alerts',
+    {
+      description:
+        'At the user’s request, pause this computer’s alerts on all paired devices. Requests remain in the inbox. Defaults to one hour; maximum seven days.',
+      inputSchema: z.object({
+        durationSeconds: z.number().int().min(60).max(LIMITS.pauseMaxSec).default(3600),
+      }),
+      outputSchema: z.union([z.object({ alertsPausedUntil: z.number().nullable() }), errorSchema]),
+      annotations: mutating,
+    },
+    async ({ durationSeconds }, ctx) => {
+      try {
+        const value = await changePause(durationSeconds, ctx.mcpReq.signal);
+        return result({ ...value }, 'Alerts from this computer are paused.');
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  server.registerTool(
+    'resume_alerts',
+    {
+      description: 'At the user’s request, resume this computer’s alerts on all paired devices.',
+      inputSchema: z.object({}),
+      outputSchema: z.union([z.object({ alertsPausedUntil: z.number().nullable() }), errorSchema]),
+      annotations: { ...mutating, idempotentHint: true },
+    },
+    async (_args, ctx) => {
+      try {
+        const value = await changePause(null, ctx.mcpReq.signal);
+        return result({ ...value }, 'Alerts from this computer are enabled.');
+      } catch (error) {
+        return failure(error);
+      }
+    },
+  );
+  return server;
 }
 
 export function startMcp(): void {
-  void serveStdio(() => {
-    const server = new McpServer(
-      { name: 'greatping', version: VERSION },
-      {
-        instructions:
-          'Prefer your host’s native question and approval prompts. Before opening a native prompt that needs the user at the computer, call notify with no message to send a generic alert, then use the native prompt. GreatPing cannot answer or approve that native prompt. Use ask_user only when the user explicitly wants to answer a GreatPing question from a device. Do not copy native prompts, commands, secrets, or choices into notify.',
-      },
-    );
-
-    server.registerTool(
-      'ask_user',
-      {
-        description:
-          'Ask a separate GreatPing question on the paired devices and wait for its answer. This does not answer a native host question or approval. Use only when an answer from a device is explicitly wanted.',
-        inputSchema: z.object({
-          question: z.string().trim().min(1).max(LIMITS.bodyMaxLength),
-          choices: z
-            .array(
-              z
-                .string()
-                .trim()
-                .min(1)
-                .max(LIMITS.choiceMaxLength)
-                .refine((s) => !s.includes(',')),
-            )
-            .max(LIMITS.choicesMax)
-            .optional()
-            .describe('Optional choices. Omit for a free-form answer.'),
-          timeoutSeconds: z.number().int().min(10).max(86400).default(LIMITS.timeoutDefaultSec),
-        }),
-      },
-      async ({ question, choices, timeoutSeconds }, ctx) => {
-        const args = ['ask', question, '--timeout', String(timeoutSeconds), '--json'];
-        if (choices?.length) args.push('--choices', choices.join(','));
-        try {
-          const result = await runCli(args, ctx.mcpReq.signal);
-          if (result.code !== 0) {
-            return failure(
-              result.code === 2
-                ? 'The question expired without an answer.'
-                : result.stderr.trim() || 'Could not get an answer.',
-            );
-          }
-          const parsed = JSON.parse(result.stdout) as {
-            requestId: string;
-            answer: { choice?: string; text?: string };
-          };
-          const answer = parsed.answer.choice ?? parsed.answer.text;
-          if (!answer) return failure('The device returned an empty answer.');
-          return {
-            content: [{ type: 'text' as const, text: answer }],
-            structuredContent: { requestId: parsed.requestId, answer: parsed.answer },
-          };
-        } catch (error) {
-          return failure(error instanceof Error ? error.message : 'Could not get an answer.');
-        }
-      },
-    );
-
-    server.registerTool(
-      'notify',
-      {
-        description:
-          'Ping the paired devices before a native question or approval. Omit message for a generic attention alert. This does not answer, approve, or resume the native prompt.',
-        inputSchema: z.object({
-          message: z.string().trim().min(1).max(LIMITS.bodyMaxLength).optional(),
-        }),
-      },
-      async ({ message }, ctx) => {
-        try {
-          const result = await runCli(
-            ['notify', message ?? 'Agent needs your attention. Please return to your computer.'],
-            ctx.mcpReq.signal,
-          );
-          if (result.code !== 0)
-            return failure(result.stderr.trim() || 'Could not send the notice.');
-          const text = /paused/i.test(result.stderr)
-            ? 'Alerts from this computer are paused: the notice is listed in the app, but no device was alerted.'
-            : 'Notification sent.';
-          return { content: [{ type: 'text' as const, text }] };
-        } catch (error) {
-          return failure(error instanceof Error ? error.message : 'Could not send the notice.');
-        }
-      },
-    );
-
-    return server;
-  });
+  void serveStdio(createMcpServer);
 }

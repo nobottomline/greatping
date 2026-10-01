@@ -14,7 +14,7 @@ greatping setup    # Claude Code and Codex alert your devices when they wait
 
 - **Automatic alerts.** `greatping setup` adds hooks to Claude Code and Codex. Claude Code alerts when it asks a question, needs a permission (not when auto mode decides) or an MCP server asks for input. Codex alerts when it finishes a turn. The alert clears when the prompt closes, you type, or the turn ends.
 - **Quiet while you're there.** While you use the computer, an alert waits a short delay (30 seconds by default, set in the app), so a prompt you answer at the keyboard never reaches your phone.
-- **On request.** `greatping notify "Deploy finished"` and `greatping ask "Ship it?" --choices Yes,No` work from any script or agent. `greatping mcp` offers the same as MCP tools.
+- **On request.** `greatping notify "Deploy finished"` and `greatping ask "Ship it?" --choices Yes,No` work from any script or agent. `greatping mcp` exposes `notify`, `ask_user`, `get_status`, `pause_alerts` and `resume_alerts`.
 - **In plain words.** The GreatPing skill teaches agents to act on "ping me when the tests pass" or "no pings for an hour" (`greatping pause 1h`).
 
 GreatPing never answers or approves anything on your computer; native prompts stay in the agent.
@@ -34,6 +34,14 @@ The agent skill is in [`skills/greatping`](skills/greatping/SKILL.md). `greatpin
 ```bash
 npx skills add nobottomline/greatping
 ```
+
+## Removal
+
+`greatping uninstall --dry-run` previews cleanup without changes.
+`greatping uninstall` confirms removal of detected integrations, pairing and
+local state. Global npm installs are removed through npm when ownership can be
+verified; source checkouts are preserved. Changed or unowned files are reported
+and preserved. See the [CLI removal reference](apps/cli/README.md#removal).
 
 ## This repository
 

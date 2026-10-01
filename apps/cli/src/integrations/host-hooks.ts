@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import process from 'node:process';
 import { CLAUDE_ALERTS, type ClaudeAlert } from './events';
 import { type HookGroup, type HookHandler, hookGroups, readJson, writeJson } from './json-file';
@@ -11,6 +11,7 @@ import {
   parseShellCommand,
   shellCommand,
 } from './launcher';
+import { forgetAsset, ownedAssets, recordAsset } from './ownership';
 import type { HostId } from './state';
 
 /**
@@ -25,7 +26,7 @@ interface HookEvent {
   /**
    * Run in the foreground. Hooks are asynchronous so a slow network never
    * delays the agent, except where the host may exit right after the event
-   * and drop a background hook (verified with `codex exec`).
+   * and drop a background hook (Codex exec and single-turn Claude SDK runs).
    */
   sync?: boolean;
 }
@@ -58,7 +59,7 @@ const CLAUDE_EVENTS: HookEvent[] = [
   { event: 'PermissionDenied', matcher: '.*' },
   // The user is back or the turn is over: nothing from before is still waiting.
   { event: 'UserPromptSubmit' },
-  { event: 'Stop' },
+  { event: 'Stop', sync: true },
   { event: 'SessionEnd', sync: true },
 ];
 
@@ -80,8 +81,8 @@ export const HOSTS: Record<HostId, HostHooks> = {
     settingsPath: () => join(homedir(), '.claude', 'settings.json'),
     detected: () => existsSync(join(homedir(), '.claude')),
     events: CLAUDE_EVENTS,
-    // Exec form: no shell, so paths with spaces need no quoting. Async: the
-    // host never waits for GreatPing, so a slow network cannot delay a prompt.
+    // Exec form: no shell, so paths with spaces need no quoting. Attention
+    // hooks are async; Stop and SessionEnd finish before host teardown.
     handler: (launcher, hookArgs, sync) => ({
       type: 'command',
       command: launcher.command,
@@ -113,6 +114,7 @@ interface OwnHandler {
   args: string[];
   finished: boolean;
   alerts: ClaudeAlert[];
+  async: boolean;
 }
 
 /** GreatPing's invocation in a handler, or null for anyone else's handler. */
@@ -126,6 +128,17 @@ function ownHandler(host: HostId, handler: unknown): OwnHandler | null {
   const at = parts.indexOf('hook');
   if (at < 0 || parts[at + 1] !== host) return null;
   const [executable = '', ...rest] = parts;
+  const recorded = ownedAssets().some(
+    (asset) =>
+      asset.kind === 'hooks' &&
+      asset.host === host &&
+      asset.launcher?.command === executable &&
+      asset.launcher.args.every((arg, index) => parts[index + 1] === arg),
+  );
+  const recognizable =
+    /^greatping(?:\.(?:cmd|exe))?$/.test(basename(executable)) ||
+    parts.slice(1, at).some((part) => /(?:^|[/\\])greatping(?:[/\\]|$)/.test(part));
+  if (!recorded && !recognizable) return null;
   const alertFlag = parts.indexOf('--alerts', at + 2);
   const alerts =
     alertFlag < 0
@@ -138,6 +151,7 @@ function ownHandler(host: HostId, handler: unknown): OwnHandler | null {
     args: rest.slice(0, at - 1),
     finished: parts.slice(at + 2).includes('--finished'),
     alerts,
+    async: (handler as HookHandler).async === true,
   };
 }
 
@@ -217,7 +231,7 @@ export function inspectHooks(host: HostHooks): HooksState {
   const problem = launcherProblem(first.command, first.args);
   const invocation = { command: first.command, args: first.args };
   if (problem) return { status: 'broken', finished: first.finished, problem, invocation };
-  if (found.some((own) => own === undefined)) {
+  if (found.some((own, index) => own === undefined || (events[index]?.sync && own.async))) {
     return {
       status: 'outdated',
       finished: first.finished,
@@ -270,6 +284,9 @@ export function installHooks(
       { ...(matcher ? { matcher } : {}), hooks: [host.handler(launcher, hookArgs, sync === true)] },
     ];
   }
+  // Record the exact invocation before installing it, so custom development
+  // launchers are recognised without mistaking another tool’s hook for ours.
+  recordAsset({ kind: 'hooks', path, host: host.id, launcher });
   writeJson(path, { ...settings, hooks: groups });
 }
 
@@ -288,8 +305,14 @@ export function uninstallHooks(host: HostHooks): boolean {
     if (kept.length > 0) groups[event] = kept;
     else delete groups[event];
   }
-  if (!changed) return false;
+  if (!changed) {
+    forgetAsset('hooks', path);
+    return false;
+  }
   const { hooks: _removed, ...rest } = settings;
-  writeJson(path, Object.keys(groups).length > 0 ? { ...rest, hooks: groups } : rest);
+  writeJson(path, Object.keys(groups).length > 0 ? { ...rest, hooks: groups } : rest, {
+    backup: false,
+  });
+  forgetAsset('hooks', path);
   return true;
 }

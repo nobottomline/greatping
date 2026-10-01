@@ -7,7 +7,8 @@ import { CLAUDE_ALERTS, type ClaudeAlert } from '../integrations/events';
 import { HOSTS, installHooks, selectedAlerts, uninstallHooks } from '../integrations/host-hooks';
 import { currentLauncher } from '../integrations/launcher';
 import { registerCodexMcp, unregisterCodexMcp } from '../integrations/mcp';
-import { installSkill, uninstallSkill } from '../integrations/skill';
+import { executeRemoval, integrationRemoval } from '../integrations/removal';
+import { installSkill } from '../integrations/skill';
 import { setupSkills } from '../integrations/skills-cli';
 import type { HostId } from '../integrations/state';
 import { reportMachine } from '../report';
@@ -188,39 +189,6 @@ function changesFor(id: HostId, options: SetupOptions): Change[] {
   const host = HOSTS[id];
   const report = inspectHost(id);
   const changes: Change[] = [];
-  if (options.remove) {
-    if (report.hooks.status !== 'off') {
-      changes.push({
-        host: id,
-        label: `Remove alerts from ${host.name}`,
-        apply: () => {
-          uninstallHooks(host);
-          return null;
-        },
-      });
-    }
-    if (id === 'codex' && report.mcp.registered) {
-      changes.push({
-        host: id,
-        label: 'Remove GreatPing tools from Codex',
-        apply: () => {
-          unregisterCodexMcp();
-          return null;
-        },
-      });
-    }
-    if (report.skill) {
-      changes.push({
-        host: id,
-        label: `Remove the GreatPing skill from ${host.name}`,
-        apply: () => {
-          uninstallSkill(id);
-          return null;
-        },
-      });
-    }
-    return changes;
-  }
 
   const launcher = currentLauncher();
   if (id === 'claude') {
@@ -257,7 +225,7 @@ function changesFor(id: HostId, options: SetupOptions): Change[] {
   if (id === 'codex' && (!report.mcp.registered || report.mcp.problem)) {
     changes.push({
       host: id,
-      label: 'Give Codex the GreatPing tools (notify, ask_user) over MCP',
+      label: 'Give Codex GreatPing notification, question, status and pause tools over MCP',
       apply: () => registerCodexMcp(launcher),
     });
   }
@@ -276,6 +244,30 @@ function changesFor(id: HostId, options: SetupOptions): Change[] {
 
 export async function setup(target: string | undefined, options: SetupOptions): Promise<number> {
   const only = parseHost(target, 'setup');
+  if (options.remove) {
+    const changes = integrationRemoval(only ? [only] : HOST_IDS);
+    ui.heading('Remove agent setup');
+    for (const change of changes) print(`  • ${change.label}`);
+    if (!changes.length) {
+      ui.info('No GreatPing agent setup was found.');
+      return 0;
+    }
+    if (!options.yes) {
+      if (!interactive)
+        throw new UsageError(
+          'setup',
+          'Confirm with --yes to change agent settings non-interactively.',
+        );
+      if (!(await confirm('Remove these?', false))) return Number(process.exitCode ?? 0);
+    }
+    const results = await executeRemoval(changes);
+    for (const result of results) {
+      if (result.status === 'failed') ui.error(result.label, result.error);
+      else ui.success(result.label);
+    }
+    await reportMachine(loadConfig());
+    return results.some((result) => result.status === 'failed') ? 1 : 0;
+  }
   const ids = only ? [only] : HOST_IDS.filter((id) => inspectHost(id).detected || options.remove);
   ui.heading(options.remove ? 'Remove agent setup' : 'Set up your agents');
   if (ids.length === 0) {

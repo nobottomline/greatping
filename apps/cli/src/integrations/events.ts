@@ -26,10 +26,8 @@ export type HookStep =
   | { op: 'resolve-session' };
 
 export interface HookOptions {
-  /** Also alert when the agent finishes a turn. */
+  /** Explicitly opt in to turn-end alerts, including SDK hosts. */
   finished: boolean;
-  /** False for scripted runs (`claude -p`, SDK), which nobody watches. */
-  interactive: boolean;
   alerts?: ClaudeAlert[];
 }
 
@@ -51,7 +49,7 @@ const ELICITATION = 'elicitation';
 const FINISHED = 'finished';
 
 function finishedSteps(host: string, options: HookOptions): HookStep[] {
-  return options.finished && options.interactive
+  return options.finished
     ? [
         { op: 'resolve-session' },
         {

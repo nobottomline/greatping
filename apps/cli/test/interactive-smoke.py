@@ -162,7 +162,7 @@ try:
         t = Terminal(['setup', 'claude'], env); t.wait('Enter Toggle'); t.send('\x1b[F\r')
         t.wait('Enter Select'); t.send('\r'); t.finish()
         assert json.loads((home / 'npx-args.json').read_text()) == [
-            '--yes', 'skills', 'add', 'nobottomline/greatping', '--skill', 'greatping',
+            '--yes', 'skills@1.7.0', 'add', 'nobottomline/greatping', '--skill', 'greatping',
             '--global', '--agent', 'claude-code',
         ]
         print('PASS Skill setup hands the requested agent to npx and keeps stdout clean')
@@ -247,6 +247,22 @@ globalThis.fetch = (url, options) => {{
         prefs.write_text('{"claude":{"alerts":null,"finished":"bad"},"codex":null}')
         t = picker(env); t.send('\x1b'); t.finish()
         print('PASS Corrupt saved preferences do not crash the picker')
+        before = hashes(home)
+        t = Terminal(['uninstall', '--dry-run'], env)
+        t.wait('Dry run:'); t.finish()
+        assert hashes(home) == before
+        print('PASS Uninstall dry-run leaves settings unchanged')
+
+        t = Terminal(['uninstall'], env)
+        t.wait('Remove these GreatPing components?'); t.send('\r'); t.finish()
+        assert hashes(home) == before
+        print('PASS Uninstall defaults to declining removal')
+
+        t = Terminal(['uninstall'], env)
+        t.wait('Remove these GreatPing components?'); t.send('\x03'); t.finish(130)
+        assert hashes(home) == before
+        print('PASS Uninstall Ctrl+C leaves settings unchanged')
+
 finally:
     for terminal in list(ACTIVE):
         terminal.close()

@@ -1,21 +1,8 @@
-import { LIMITS, type PauseMachineResponse } from '@greatping/protocol';
-import { api } from '../api';
-import { isPaired, loadConfig } from '../config';
+import { LIMITS } from '@greatping/protocol';
 import { clock, parseDuration } from '../duration';
+import { changePause } from '../operations';
 import { command, muted, ui } from '../ui';
 import { UsageError } from './usage';
-
-function requirePaired() {
-  const config = loadConfig();
-  if (!isPaired(config)) {
-    throw new UsageError(
-      null,
-      'This computer is not paired.',
-      `Run ${command('greatping login')} first.`,
-    );
-  }
-  return config;
-}
 
 /**
  * Pauses this computer's alerts on every device. Requests still reach the
@@ -32,10 +19,7 @@ export async function pause(duration: string | undefined) {
   if (seconds < 60 || seconds > LIMITS.pauseMaxSec) {
     throw new UsageError('pause', 'Pause for at least a minute and at most 7 days.');
   }
-  const config = requirePaired();
-  const res = await api<PauseMachineResponse>(config, 'PUT', '/machine/me/pause', {
-    body: { until: Date.now() + seconds * 1000 },
-  });
+  const res = await changePause(seconds);
   ui.success(`Alerts from this computer are paused until ${clock(res.alertsPausedUntil ?? 0)}.`);
   ui.next(
     muted(`Requests still appear in the app. Resume early with ${command('greatping resume')}.`),
@@ -44,8 +28,7 @@ export async function pause(duration: string | undefined) {
 }
 
 export async function resume() {
-  const config = requirePaired();
-  await api<PauseMachineResponse>(config, 'PUT', '/machine/me/pause', { body: { until: null } });
+  await changePause(null);
   ui.success('Alerts from this computer are on.');
   return 0;
 }

@@ -13,18 +13,18 @@ When GreatPing's hooks are installed, the user's devices are alerted whenever th
 
 ## Tools
 
-Prefer GreatPing's MCP tools when the host lists them (`notify`, `ask_user` from the `greatping` server). They run outside the agent sandbox, so they work where shell commands have no network access. Otherwise use the CLI:
+Prefer GreatPing's MCP tools when the host lists them (`notify`, `ask_user`, `get_status`, `pause_alerts`, `resume_alerts` from the `greatping` server). They run outside the agent sandbox, so they work where shell commands have no network access. Otherwise use the CLI:
 
-| Goal | Command |
-|---|---|
-| Send an alert | `greatping notify "<message>" --title "<title>"` |
-| Ask and wait for an answer | `greatping ask "<question>" --choices Yes,No --timeout 30m` |
-| Pause alerts from this computer | `greatping pause 1h` (`30m`, `2h`, up to `7d`) |
-| Resume alerts | `greatping resume` |
-| Check pairing and integrations | `greatping status` |
-| Diagnose or repair | `greatping doctor` (`--fix` to repair hooks) |
+| Goal | MCP tool | CLI fallback |
+|---|---|---|
+| Send an alert | `notify` | `greatping notify "<message>" --title "<title>"` |
+| Ask and wait for an answer | `ask_user` | `greatping ask "<question>" --choices Yes,No --timeout 30m` |
+| Pause alerts from this computer | `pause_alerts` | `greatping pause 1h` (`30m`, `2h`, up to `7d`) |
+| Resume alerts | `resume_alerts` | `greatping resume` |
+| Check pairing and integrations | `get_status` | `greatping status` |
+| Diagnose or repair | — | `greatping doctor` (`--fix` to repair hooks) |
 
-`ask` prints only the answer to stdout (`--json` prints `{"requestId","answer"}`); exit code `2` means nobody answered before the timeout. Choices must not contain commas.
+`ask` prints the answer to stdout; `--json` returns `requestId`, `status`, `paused` and an optional `answer`. Exit code `2` means the question ended without an answer. CLI choices use comma-separated text; MCP choices are an array. A notification marked `accepted` was accepted by the service; phone delivery is not confirmed.
 
 ## When to use it
 
@@ -39,3 +39,5 @@ Prefer GreatPing's MCP tools when the host lists them (`notify`, `ask_user` from
 - `ask` does not answer a native prompt. It is a separate question on the phone.
 - If a command says the computer is not paired, tell the user to run `greatping login` themselves. Pairing needs their phone, so do not run it for them.
 - If alerts are paused, `notify` and `ask` still create the request, but no device is alerted. Tell the user instead of retrying.
+
+- Use pause and resume only at the user’s request. Installation, pairing, repair and removal are CLI administration; they are not MCP tools.

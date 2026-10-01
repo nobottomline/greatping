@@ -1,9 +1,10 @@
 import type { MachineMeResponse } from '@greatping/protocol';
-import { ApiError, api, host } from '../api';
+import { ApiError, host } from '../api';
 import { isPaired, loadConfig } from '../config';
 import { clock } from '../duration';
 import { HOST_IDS, hostIntegrations, inspectHost } from '../integrations';
 import { HOSTS } from '../integrations/host-hooks';
+import { readMachine } from '../operations';
 import { reportMachine } from '../report';
 import { color, command, muted, print, ui } from '../ui';
 import { hostSummary } from './setup';
@@ -38,9 +39,7 @@ export async function status(options: { json?: boolean }): Promise<number> {
   let me: MachineMeResponse | null = null;
   let problem: string | null = null;
   try {
-    me = await api<MachineMeResponse>(config, 'GET', '/machine/me', {
-      signal: AbortSignal.timeout(8000),
-    });
+    me = await readMachine(config);
   } catch (error) {
     problem = error instanceof Error ? error.message : 'Could not check the pairing.';
     if (error instanceof ApiError && error.status === 401 && options.json) {
