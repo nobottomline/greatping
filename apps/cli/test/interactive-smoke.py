@@ -20,8 +20,9 @@ import tempfile
 import termios
 import time
 
-CLI = Path(__file__).resolve().parents[1] / 'dist/index.js'
-NODE = subprocess.check_output(['node', '-p', 'process.execPath'], text=True).strip()
+CLI = Path(os.environ.get('GREATPING_TEST_CLI', Path(__file__).resolve().parents[1] / 'dist/index.js'))
+NODE = os.environ.get('GREATPING_TEST_NODE') or subprocess.check_output(
+    ['node', '-p', 'process.execPath'], text=True).strip()
 ACTIVE = []
 
 

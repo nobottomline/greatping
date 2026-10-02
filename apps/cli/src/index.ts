@@ -14,7 +14,7 @@ import { UsageError } from './commands/usage';
 import { runHook } from './integrations/runner';
 import { startMcp } from './mcp';
 import { color, command, muted, print, ui } from './ui';
-import { VERSION } from './version';
+import { MIN_NODE_VERSION, supportsNodeVersion, VERSION } from './version';
 
 type Options = Record<string, { type: 'string' | 'boolean'; short?: string }>;
 
@@ -265,6 +265,11 @@ function printCommandHelp(name: string, c: Command): void {
 }
 
 async function main(argv: string[]): Promise<number> {
+  if (!supportsNodeVersion(process.versions.node)) {
+    throw new Error(
+      `GreatPing requires Node.js ${MIN_NODE_VERSION} or later. Upgrade Node.js first.`,
+    );
+  }
   const [name, ...rest] = argv.filter((arg) => arg !== '--no-color');
   if (!name || name === '-h' || name === '--help' || name === 'help') {
     const topic = name === 'help' ? rest[0] : undefined;

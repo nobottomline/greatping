@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs';
 import { delimiter, isAbsolute, join } from 'node:path';
 import process from 'node:process';
+import { supportsNodeVersion } from '../version';
 
 /**
  * How another program (a host hook, an MCP client) starts this CLI. The
@@ -64,13 +65,12 @@ function realpath(path: string): string | null {
   }
 }
 
-function nodeMajor(node: string): number | null {
+function nodeVersion(node: string): string | null {
   const result = spawnSync(node, ['-p', 'process.versions.node'], {
     encoding: 'utf8',
     timeout: 3000,
   });
-  const major = Number.parseInt(result.stdout ?? '', 10);
-  return result.status === 0 && Number.isFinite(major) ? major : null;
+  return result.status === 0 ? result.stdout.trim() : null;
 }
 
 export function currentLauncher(): Launcher {
@@ -80,7 +80,7 @@ export function currentLauncher(): Launcher {
   if (installed && realpath(installed) === script) return { command: installed, args: [] };
   const stableNode = findAllOnPath('node')
     .filter((node) => !isVersionedPath(node))
-    .find((node) => (nodeMajor(node) ?? 0) >= 20);
+    .find((node) => supportsNodeVersion(nodeVersion(node) ?? ''));
   return { command: stableNode ?? process.execPath, args: [script] };
 }
 

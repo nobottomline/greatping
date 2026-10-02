@@ -1,0 +1,16 @@
+name: Feature request
+description: Describe a concrete CLI use case.
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What task are you trying to complete?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior and alternatives
+      description: Describe the expected command or workflow. Larger changes should be discussed before implementation.
+    validations:
+      required: true

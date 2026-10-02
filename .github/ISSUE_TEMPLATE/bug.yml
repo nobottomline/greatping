@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a reproducible CLI problem without credentials or private prompts.
+body:
+  - type: markdown
+    attributes:
+      value: Please report vulnerabilities privately through the Security tab. Do not attach credentials, pairing codes, config files or private prompt content.
+  - type: input
+    id: version
+    attributes:
+      label: GreatPing version and install method
+      placeholder: greatping --version; npm global, source checkout, etc.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: OS, Node version and agent version
+      placeholder: macOS 27; Node 24; Claude Code or Codex version, if relevant
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Use synthetic messages and redact personal paths.
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected and actual behavior
+    validations:
+      required: true

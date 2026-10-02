@@ -2,14 +2,22 @@
   "name": "greatping-oss",
   "private": true,
   "description": "GreatPing CLI, agent skill and wire protocol",
+  "engines": {
+    "node": "^24.11.0"
+  },
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -F greatping test",
     "build": "pnpm -F greatping build",
-    "lint": "biome check ."
+    "lint": "pnpm lint:biome && pnpm lint:types",
+    "lint:biome": "biome check .",
+    "lint:types": "oxlint --type-aware apps packages",
+    "format": "biome format --write ."
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
+    "oxlint": "1.86.0",
+    "oxlint-tsgolint": "7.0.2003",
     "typescript": "~5.9.3"
   },
   "packageManager": "pnpm@10.33.0"

@@ -28,7 +28,7 @@ async function session(mode, run, paired = true) {
     [
       '--import',
       new URL('./fixtures/operations-fetch.mjs', import.meta.url).pathname,
-      new URL('../dist/index.js', import.meta.url).pathname,
+      process.env.GREATPING_TEST_CLI ?? new URL('../dist/index.js', import.meta.url).pathname,
       'mcp',
     ],
     {
@@ -223,12 +223,5 @@ test('MCP failures have a structured error without leaking the credential', asyn
     assert.equal(result.structuredContent.status, 'error');
     assert.equal(result.structuredContent.code, 'unauthorized');
     assert.doesNotMatch(JSON.stringify(result), /PRIVATE TOKEN/);
-  });
-});
-
-test('MCP bounded operations retain compatibility before Node 20.3', async () => {
-  await session('node20', async ({ request }) => {
-    const result = await call(request, 'notify', { message: 'Complete' });
-    assert.equal(result.structuredContent.status, 'accepted');
   });
 });

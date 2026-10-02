@@ -2,7 +2,7 @@
 
 > **Preview.** GreatPing is in active development. The mobile app is in private testing and not yet in the App Store or Google Play, so pairing a computer needs an invitation to the test. Commands, the service address and data may change without notice until the first stable release.
 
-Get an alert on your phone or tablet when a coding agent on this computer needs you. Requires Node.js 20 or later and the GreatPing app.
+Get an alert on your phone or tablet when a coding agent on this computer needs you. Requires Node.js 22.20 or later and the GreatPing app.
 
 ```bash
 npm install -g greatping
@@ -19,7 +19,7 @@ greatping uninstall          # confirm and remove GreatPing
 greatping logout
 ```
 
-From a checkout, build with `pnpm -F greatping build` and run `node apps/cli/dist/index.js <command>`.
+From a checkout, use Node.js 24 LTS (24.11 or later), build with `pnpm -F greatping build` and run `node apps/cli/dist/index.js <command>`.
 
 Every command has `--help`. `login` names the computer as the OS does (for example "Alex's MacBook Pro"; override with `--name`), prints a QR code and a manual code, and waits with a countdown. When Claude Code or Codex is installed but not alerting yet, an interactive `login` offers `setup`; non-interactive runs only print the hint and never change another tool's settings. The CLI saves its bearer credential under `~/.config/greatping/config.json` on macOS/Linux or `%APPDATA%\greatping\config.json` on Windows with user-only permissions.
 
@@ -187,4 +187,8 @@ source loader), `pnpm -F greatping build`, and `pnpm -F greatping test:interacti
 an isolated temporary home, including Enter/Continue, color, cancel/signals,
 repeat setup, a narrow terminal, all-off preferences and the npx handoff. Its
 Codex and npx fixtures never contact the hosted service or install real skills.
-CI runs the bundled PTY suite on Node.js 20 and the source tests on Node.js 24.
+`pnpm -F greatping test:package` builds and installs an npm archive outside the
+workspace, verifies the executable and bundled skill, and runs the hook, MCP
+and PTY suites against that installation. CI builds on Node.js 24 and qualifies
+the archive on Node.js 22.20 and Node.js 24. The build uses tsdown; users of the
+installed CLI do not need tsdown or the private protocol workspace package.

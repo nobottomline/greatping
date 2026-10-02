@@ -1,0 +1,6 @@
+# Accepted changes are applied to the internal source before synchronization.
+* @nobottomline
+/.github/ @nobottomline
+/scripts/ @nobottomline
+/apps/cli/src/config.ts @nobottomline
+/apps/cli/src/integrations/ @nobottomline

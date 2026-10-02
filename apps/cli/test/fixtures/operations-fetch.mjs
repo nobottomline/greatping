@@ -5,7 +5,6 @@ const mode = process.env.GREATPING_TEST_MODE ?? 'answered';
 const log = process.env.GREATPING_TEST_LOG;
 const paused = mode === 'paused';
 let until = null;
-if (mode === 'node20') AbortSignal.any = undefined;
 if (mode === 'cleanup-fail') {
   const original = fs.rmSync;
   fs.rmSync = (path, options) => {

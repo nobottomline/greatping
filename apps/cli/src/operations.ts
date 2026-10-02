@@ -23,24 +23,7 @@ function paired(): Config {
 function bounded(signal?: AbortSignal, ms = 8000): AbortSignal {
   const deadline = AbortSignal.timeout(ms);
   if (!signal) return deadline;
-  if (typeof AbortSignal.any === 'function') return AbortSignal.any([signal, deadline]);
-  // AbortSignal.any arrived in Node 20.3; retain the CLI's Node >=20 contract.
-  const controller = new AbortController();
-  const abort = (event: Event) => controller.abort((event.target as AbortSignal).reason);
-  for (const source of [signal, deadline]) {
-    if (source.aborted) {
-      controller.abort(source.reason);
-      break;
-    }
-    source.addEventListener('abort', abort, { once: true });
-  }
-  const cleanup = () => {
-    signal.removeEventListener('abort', abort);
-    deadline.removeEventListener('abort', abort);
-  };
-  if (controller.signal.aborted) cleanup();
-  else controller.signal.addEventListener('abort', cleanup, { once: true });
-  return controller.signal;
+  return AbortSignal.any([signal, deadline]);
 }
 
 export interface NoticeResult {

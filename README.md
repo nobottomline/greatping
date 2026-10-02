@@ -4,11 +4,23 @@
 
 Get an alert on your phone or tablet when a coding agent on your computer needs you: a question, a permission prompt, or a finished turn waiting for your next message.
 
+The source CLI requires Node.js 22.20 or later. Development uses Node.js 24 LTS;
+published versions retain their own declared Node.js requirements.
+
 ```bash
 npm install -g greatping
 greatping login    # pair this computer with the GreatPing app
 greatping setup    # Claude Code and Codex alert your devices when they wait
 ```
+
+## Source and installed releases
+
+This README and the command reference describe `main`, including changes that
+may not yet be on npm. `npm install -g greatping` installs the approved npm
+release; check `greatping --version` and its `--help` before using a new command.
+Use the [release notes](https://github.com/nobottomline/greatping/releases) and
+[CHANGELOG.md](CHANGELOG.md) to distinguish released and unreleased behavior.
+An automatic source sync does not publish a new npm version.
 
 ## How it works
 
@@ -51,7 +63,8 @@ and preserved. See the [CLI removal reference](apps/cli/README.md#removal).
 | [`packages/protocol`](packages/protocol) | Request and response types shared with the service |
 | [`skills/greatping`](skills/greatping) | The agent skill |
 
-It is published from GreatPing's internal monorepo; the service and the mobile apps are not open source. See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+It is published from GreatPing's internal monorepo; the service and the mobile apps are not open source. See [CONTRIBUTING.md](CONTRIBUTING.md), [SUPPORT.md](SUPPORT.md),
+[SECURITY.md](SECURITY.md) and [community conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

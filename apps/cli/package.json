@@ -30,14 +30,15 @@
     "dist"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22.20.0"
   },
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "tsdown",
+    "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && node --experimental-transform-types --no-warnings --import ./test/ts-resolve.mjs --test test/*.test.mjs",
-    "test:interactive": "python3 test/interactive-smoke.py"
+    "test:interactive": "python3 test/interactive-smoke.py",
+    "test:package": "pnpm build && node test/package-smoke.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
@@ -50,7 +51,7 @@
     "@greatping/protocol": "workspace:*",
     "@types/node": "^22.13.11",
     "@types/ws": "^8.5.14",
-    "tsup": "^8.4.0",
+    "tsdown": "0.23.0",
     "typescript": "~5.9.3"
   }
 }

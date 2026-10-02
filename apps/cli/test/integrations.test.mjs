@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   utimesSync,
   writeFileSync,
@@ -22,7 +23,12 @@ import {
   selectedAlerts,
   uninstallHooks,
 } from '../src/integrations/host-hooks.ts';
-import { isVersionedPath, parseShellCommand, shellCommand } from '../src/integrations/launcher.ts';
+import {
+  currentLauncher,
+  isVersionedPath,
+  parseShellCommand,
+  shellCommand,
+} from '../src/integrations/launcher.ts';
 import { codexMcpServer } from '../src/integrations/mcp.ts';
 import { runSteps } from '../src/integrations/runner.ts';
 import { installSkill, skillInstalled, uninstallSkill } from '../src/integrations/skill.ts';
@@ -36,6 +42,32 @@ import {
 } from '../src/integrations/state.ts';
 
 const defaultOptions = { finished: false };
+
+test('hook launchers skip stable Node binaries below the supported minimum', async () => {
+  await withHome(async (root) => {
+    const candidates = ['20.20.0', '22.19.0', '22.20.0'].map((version, index) => {
+      const directory = join(root, `runtime-${index}`);
+      mkdirSync(directory);
+      const executable = join(directory, 'node');
+      writeFileSync(executable, `#!/bin/sh\nprintf '%s\\n' '${version}'\n`);
+      chmodSync(executable, 0o755);
+      return executable;
+    });
+    const previousPath = process.env.PATH;
+    const previousScript = process.argv[1];
+    const script = join(root, 'cli.js');
+    writeFileSync(script, '');
+    process.env.PATH = candidates.map((candidate) => join(candidate, '..')).join(':');
+    process.argv[1] = script;
+    try {
+      assert.deepEqual(currentLauncher(), { command: candidates[2], args: [realpathSync(script)] });
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      process.argv[1] = previousScript;
+    }
+  });
+});
 
 /** A stand-in for a Node binary at a version-independent path. */
 function fakeNode(root) {

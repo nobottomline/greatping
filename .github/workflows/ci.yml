@@ -5,27 +5,23 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  check:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+  quality:
+    uses: ./.github/workflows/quality.yml
+  gate:
+    name: CI passed
+    if: always()
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
-      # The published package must run on the oldest supported Node.
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-      - run: node apps/cli/dist/index.js --version
-      - run: pnpm -F greatping test:interactive
+      - env:
+          RESULT: ${{ needs.quality.result }}
+        run: test "$RESULT" = success

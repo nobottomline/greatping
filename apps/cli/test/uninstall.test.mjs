@@ -258,7 +258,10 @@ test('global npm removal runs last and verifies the running package root', async
     const packageRoot = join(modules, 'greatping');
     mkdirSync(join(packageRoot, 'dist'), { recursive: true });
     writeFileSync(join(packageRoot, 'dist', 'index.js'), readFileSync(cli));
-    json(join(packageRoot, 'package.json'), { name: 'greatping', type: 'module' });
+    json(
+      join(packageRoot, 'package.json'),
+      JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')),
+    );
     symlinkSync(
       new URL('../node_modules', import.meta.url).pathname,
       join(packageRoot, 'node_modules'),

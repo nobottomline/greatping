@@ -7,7 +7,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_API_URL } from '../src/config.ts';
 
-const cli = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+const cli =
+  process.env.GREATPING_TEST_CLI ?? fileURLToPath(new URL('../dist/index.js', import.meta.url));
 const transport = fileURLToPath(new URL('./fixtures/hook-fetch.mjs', import.meta.url));
 const stop = { hook_event_name: 'Stop', session_id: 'fixture-session' };
 

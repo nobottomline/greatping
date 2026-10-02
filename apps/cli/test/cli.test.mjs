@@ -14,6 +14,17 @@ import {
 } from '../src/config.ts';
 import { ago, parseDuration } from '../src/duration.ts';
 import { renderQr } from '../src/qr.ts';
+import { MIN_NODE_VERSION, supportsNodeVersion } from '../src/version.ts';
+
+test('the runtime contract rejects old Node and accepts supported LTS versions', () => {
+  assert.equal(MIN_NODE_VERSION, '22.20.0');
+  for (const version of ['20.20.0', '22.19.9', '22', '', 'not-a-version']) {
+    assert.equal(supportsNodeVersion(version), false, version);
+  }
+  for (const version of ['22.20.0', '22.20.1', '22.21.0', '24.11.0', '24.21.0']) {
+    assert.equal(supportsNodeVersion(version), true, version);
+  }
+});
 
 function withHome(run) {
   const root = mkdtempSync(join(tmpdir(), 'greatping-cli-'));
