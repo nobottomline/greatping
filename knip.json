@@ -1,0 +1,12 @@
+{
+  "$schema": "https://unpkg.com/knip@6.39.0/schema.json",
+  "ignoreExportsUsedInFile": true,
+  "workspaces": {
+    ".": {
+      "entry": ["scripts/**/*.mjs"]
+    },
+    "apps/cli": {
+      "ignoreBinaries": ["scutil", "hostnamectl"]
+    }
+  }
+}

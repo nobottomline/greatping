@@ -9,16 +9,23 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -F greatping test",
     "build": "pnpm -F greatping build",
-    "lint": "pnpm lint:biome && pnpm lint:types",
+    "lint": "pnpm lint:biome && pnpm lint:types && pnpm lint:unused",
     "lint:biome": "biome check .",
     "lint:types": "oxlint --type-aware apps packages",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "lint:unused": "knip",
+    "secrets:install": "bash scripts/quality/install-gitleaks.sh",
+    "secrets": "node scripts/quality/check-secrets.mjs",
+    "secrets:tree": "node scripts/quality/check-secrets.mjs tree",
+    "secrets:history": "node scripts/quality/check-secrets.mjs history",
+    "test:quality": "node --test scripts/quality/*.test.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
     "oxlint": "1.86.0",
     "oxlint-tsgolint": "7.0.2003",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "knip": "6.39.0"
   },
   "packageManager": "pnpm@10.33.0"
 }

@@ -1,0 +1,16 @@
+title = "GreatPing secret scanning"
+
+[extend]
+useDefault = true
+
+# Firebase client identifiers are distributed in the APK. This does not attest
+# to the key's API restrictions in Google Cloud; review those independently.
+# Only this field of this file is exempt, and only from the overlapping API-key rules.
+# Service-account keys and other credentials in the same file remain detectable.
+[[allowlists]]
+description = "Public Firebase Android client API-key field"
+targetRules = ["gcp-api-key", "generic-api-key"]
+condition = "AND"
+paths = ['''^apps/mobile/google-services\.json$''']
+regexTarget = "line"
+regexes = ['''^\s*"current_key"\s*:\s*"AIza[0-9A-Za-z_\-]{35}"\s*,?\s*$''']

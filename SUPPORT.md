@@ -35,8 +35,15 @@ migration and re-pairing must be explicit.
 
 ## Getting help
 
-Use an issue for reproducible bugs or feature proposals. Include CLI, Node, OS
-and agent versions with a synthetic reproduction. Remove credentials, pairing
-codes, personal paths and private messages. Report vulnerabilities through the
-private Security channel rather than a public issue. There is no guaranteed
-support response time during preview.
+Email [support@greatping.com](mailto:support@greatping.com) for help with
+GreatPing or questions that should stay private. Use a
+[GitHub issue](https://github.com/nobottomline/greatping/issues) for reproducible
+CLI bugs or feature proposals.
+
+Include CLI, Node, OS and agent versions with a synthetic reproduction. Remove
+credentials, pairing codes, personal paths and private messages from reports,
+including email. Report vulnerabilities to
+[security@greatping.com](mailto:security@greatping.com) or through
+[GitHub private reporting](https://github.com/nobottomline/greatping/security/advisories/new),
+as described in [SECURITY.md](SECURITY.md). Do not disclose them in public issues.
+There is no guaranteed support response time during preview.

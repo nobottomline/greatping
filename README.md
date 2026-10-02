@@ -66,6 +66,18 @@ and preserved. See the [CLI removal reference](apps/cli/README.md#removal).
 It is published from GreatPing's internal monorepo; the service and the mobile apps are not open source. See [CONTRIBUTING.md](CONTRIBUTING.md), [SUPPORT.md](SUPPORT.md),
 [SECURITY.md](SECURITY.md) and [community conduct](CODE_OF_CONDUCT.md).
 
+## Contact
+
+For help with GreatPing or private support questions, email
+[support@greatping.com](mailto:support@greatping.com). Reproducible CLI bugs and
+feature proposals can also be posted as [GitHub issues](https://github.com/nobottomline/greatping/issues).
+See [SUPPORT.md](SUPPORT.md) for compatibility and reporting guidance.
+
+Report security vulnerabilities privately to
+[security@greatping.com](mailto:security@greatping.com) or through
+[GitHub private reporting](https://github.com/nobottomline/greatping/security/advisories/new).
+See [SECURITY.md](SECURITY.md); do not disclose vulnerabilities in public issues.
+
 ## License
 
 [MIT](LICENSE)

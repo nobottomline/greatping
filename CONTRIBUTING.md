@@ -12,6 +12,8 @@ Windows agent hooks and credential ACLs require separate qualification.
 
 ```bash
 pnpm install --frozen-lockfile
+pnpm secrets:install
+pnpm secrets
 pnpm lint && pnpm typecheck && pnpm test && pnpm build
 pnpm -F greatping test:package
 node apps/cli/dist/index.js --help
@@ -22,6 +24,16 @@ Biome owns formatting, import organization and general linting. Oxlint adds
 information, without duplicating Biome's general rules. These checks cover
 production code; test harnesses are excluded because they deliberately hand
 async callbacks to their test runner. TypeScript remains the type checker.
+Knip checks unused files, exports and dependencies after both lint passes.
+System commands `scutil` and `hostnamectl` are intentional platform integrations,
+not missing npm dependencies. Gitleaks 8.30.1 is installed into ignored `.tools/`
+from upstream release archives with pinned SHA-256 checks. `pnpm secrets` checks
+complete Git history and current tracked/non-ignored candidate files; it prints
+only rule IDs and locations, never matching values or source snippets. Scanner
+errors and shallow history fail the gate. Secret scanning runs on pull requests,
+pushes, weekly and before release qualification. No npm installation is needed
+for that workflow. On Windows, install the same Gitleaks version independently
+and set `GITLEAKS_BIN`; the bootstrap supports macOS and Linux.
 The CLI uses tsdown over Rolldown, with an explicit ESM output path, source maps
 and an offline bundled skill. `test:package` installs the npm archive in a
 temporary directory and checks its resources, hooks, MCP and interactive setup.

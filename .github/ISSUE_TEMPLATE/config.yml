@@ -1,5 +1,8 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Support and contact
+    url: https://github.com/nobottomline/greatping/blob/main/SUPPORT.md#getting-help
+    about: Get help or ask a private question at support@greatping.com. Do not send credentials or pairing codes.
   - name: Report a security vulnerability
     url: https://github.com/nobottomline/greatping/security/advisories/new
-    about: Report vulnerabilities privately; do not disclose them in public issues.
+    about: Report privately here or email security@greatping.com. Do not disclose vulnerabilities in public issues.

@@ -1,6 +1,13 @@
 # Security
 
-Please report vulnerabilities privately through GitHub (the **Security** tab of this repository, **Report a vulnerability**) or by email to security@greatping.com. Do not open a public issue for security problems.
+Please report vulnerabilities privately through
+[GitHub private reporting](https://github.com/nobottomline/greatping/security/advisories/new)
+(the **Security** tab of this repository, **Report a vulnerability**) or by email
+to [security@greatping.com](mailto:security@greatping.com). Do not open a public
+issue for security problems.
+
+For general help with GreatPing, email
+[support@greatping.com](mailto:support@greatping.com); see [SUPPORT.md](SUPPORT.md).
 
 The CLI installs hooks into coding agents and holds a machine credential for your GreatPing account, so reports about hook behaviour, credential storage (`~/.config/greatping/config.json`) and anything that could send prompt content off the computer are especially welcome.
 
