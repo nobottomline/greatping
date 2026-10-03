@@ -11,8 +11,12 @@ greatping setup              # alerts, skill and tools for Claude Code and Codex
 greatping status             # pairing, devices, pause, agents (--json available)
 greatping doctor [--fix]     # check (and repair) pairing, hooks and tools
 greatping pause 2h           # silence this computer on every device; resume with `greatping resume`
+greatping project labels folder  # alerts name the project folder, e.g. "Codex · billing-api"
+greatping project name "Client A" # call the current project something else (or: hide, reset, list)
 greatping ask "Continue?" --choices Yes,No --timeout 5m
 greatping notify "Build complete" --title CI
+greatping run -- pnpm test   # run a command, get "pnpm test failed · exit 1 after 4m 12s" (--on-fail, --title)
+greatping test               # test notification to every device, with Apple's or Google's answer per device
 greatping mcp                # five agent tools over MCP stdio
 greatping uninstall --dry-run # preview removal without changes
 greatping uninstall          # confirm and remove GreatPing
@@ -60,7 +64,19 @@ Agent behavior:
 - **Codex**: hooks alert when it finishes a turn and waits for you, and resolve when you reply. Codex runs new hooks only after you trust them in `/hooks`. `setup` also registers the MCP tools through `codex mcp add`, because the Codex sandbox usually blocks network access for shell commands.
 - **Both**: the GreatPing skill (`skills/greatping/SKILL.md`, also installable with `npx skills add nobottomline/greatping`), so "ping me when the deploy is done" or "no pings for an hour" work in plain words.
 
-Alerts are generic: nothing from a prompt leaves the computer, and GreatPing never answers a prompt. Attention hooks run in the background and fail silently. Stop and SessionEnd hooks finish before host teardown with bounded network timeouts. An alert waits for the computer's presence delay (30 s by default, set in the app) unless nobody has used the computer for two minutes, so a prompt answered at the keyboard never reaches your devices. `GREATPING_DISABLE=1` silences hooks for one shell or session. `setup --remove` removes agent integrations while keeping this computer paired; `hooks install|uninstall [claude|codex]` manages only the hooks.
+Alerts say who waits and why, never what about: the hook sends the agent, the reason (permission, question, input, finished) and opaque hashes of the chat session and prompt; nothing from a prompt leaves the computer, and GreatPing never answers a prompt. Attention hooks run in the background and fail silently. Stop and SessionEnd hooks finish before host teardown with bounded network timeouts. An alert waits for the computer's presence delay (30 s by default, set in the app) unless nobody has used the computer for two minutes, so a prompt answered at the keyboard never reaches your devices. `GREATPING_DISABLE=1` silences hooks for one shell or session. `setup --remove` removes agent integrations while keeping this computer paired; `hooks install|uninstall [claude|codex]` manages only the hooks.
+
+### Long commands
+
+`greatping run -- <command> [args…]` runs a command in the current terminal (stdin, stdout and stderr stay attached) and sends one alert when it ends: "pnpm test succeeded · Finished in 4m 12s" or "pnpm test failed · Exit code 1 after 4m 12s". The alert names the program and a plain-word subcommand only; arguments never leave the computer, since they can hold tokens or paths. `--title` names it yourself, `--on-fail` alerts only on failure. It exits with the command's code (127 when it cannot start), so it works in scripts; an interrupted command (Ctrl+C, SIGTERM) alerts nobody. A failed alert, for example when the computer is not paired, is a warning and never changes the exit code. The command is run directly, not through a shell: use `greatping run -- sh -c "…"` for pipelines.
+
+### Test notifications
+
+`greatping test` sends one test notification to every device of the account, the way this computer's alerts reach them (a device set to Off for it is skipped), and waits up to 30 seconds for Apple's or Google's answer. Each device is reported as accepted, still sending, not sent (Off, or notifications not set up) or refused with the push service's code and what to do: open GreatPing on the device, or report a credentials problem of the service. "Accepted" means Apple or Google took the notification for the device, which is as far as a server can know; check that it appeared. It exits 0 when at least one device was reached and prints the result as JSON with `--json`. The app has the same test per device (a device's screen › Send Test Notification).
+
+### Project labels
+
+Alerts can name the project an agent works in: "Codex · billing-api". The label is the folder name of the git repository (or worktree) root, or a name you choose; never a path. Labels are off until you turn them on in the `setup` picker (**Projects › Show project folder names**), with `greatping project labels folder`, or on the computer's screen in the app; `hidden` turns them off and the server then drops any label. Per project, from its directory: `greatping project name "Client A"` sends that name instead (for a folder under NDA, two clones with the same name, or a generic `app` folder), `greatping project hide` sends none, `greatping project reset` returns to the computer's setting and `greatping project list` shows the overrides. Overrides and the cached mode live in `alerts.json` next to the config, with the secret that keys the opaque ids. A device can also keep project names off its Lock Screen (Settings › Project Names); the app always shows them. Labels are deleted with the alert's text 7 days after it finishes.
 
 `greatping doctor` runs each installed hook with a test event and reports broken, outdated (from an older CLI or tied to one Node version) or never-run hooks; `--fix` repairs them.
 

@@ -23,7 +23,7 @@ globalThis.fetch = async (url, options = {}) => {
   }
   return Response.json(
     target.pathname.endsWith('/resolve')
-      ? { resolved: true }
+      ? { resolved: 1 }
       : { id: 'fixture-request', status: 'pending' },
   );
 };

@@ -1,9 +1,17 @@
+import process from 'node:process';
 import { LIMITS } from '@greatping/protocol';
 import { McpServer } from '@modelcontextprotocol/server';
 import { serveStdio } from '@modelcontextprotocol/server/stdio';
 import { z } from 'zod';
 import { ApiError } from './api';
-import { askQuestion, changePause, getAgentStatus, sendNotice } from './operations';
+import {
+  askQuestion,
+  changePause,
+  getAgentStatus,
+  hostFromClientName,
+  type Origin,
+  sendNotice,
+} from './operations';
 import { VERSION } from './version';
 
 const errorSchema = z.object({ status: z.literal('error'), code: z.string(), message: z.string() });
@@ -42,6 +50,11 @@ export function createMcpServer(): McpServer {
         'GreatPing sends phone alerts and separate phone questions. Native host questions and approvals stay in the host. Installed hooks already alert for native prompts; do not duplicate those alerts. Use notify for requested outcome alerts, or a generic native-prompt alert only when automatic hooks are unavailable. Use ask_user only when the user explicitly wants to answer a separate GreatPing question on a device. Pause or resume alerts only at the user’s request. Never include secrets, credentials, private file contents or code in messages. Installation, pairing, repair and removal are managed through the CLI.',
     },
   );
+  /** The agent this server runs for, from the name its MCP client reports. */
+  const origin = (): Origin => ({
+    host: hostFromClientName(server.server.getClientVersion()?.name),
+    cwd: process.cwd(),
+  });
   server.registerTool(
     'notify',
     {
@@ -63,6 +76,7 @@ export function createMcpServer(): McpServer {
           message ?? 'Agent needs your attention. Please return to your computer.',
           title,
           ctx.mcpReq.signal,
+          origin(),
         );
         return result(
           { ...value },
@@ -105,6 +119,7 @@ export function createMcpServer(): McpServer {
       try {
         const value = await askQuestion(question, choices ?? [], timeoutSeconds, {
           signal: ctx.mcpReq.signal,
+          origin: origin(),
         });
         return result(
           { ...value },

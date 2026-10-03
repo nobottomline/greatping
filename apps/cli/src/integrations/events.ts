@@ -1,14 +1,18 @@
+import type { AttentionReason } from '@greatping/protocol';
+
 /**
  * What a host hook event means for GreatPing. Pure functions of the event, so
  * the mapping is testable without a host, network or files.
  *
- * Alerts are generic on purpose: nothing from the prompt (question, command,
- * choices, file names) leaves the computer.
+ * Alerts say why the host waits, never what about: nothing from the prompt
+ * (question, command, choices, file names) leaves the computer.
  */
 
 export interface HookInput {
   hook_event_name?: string;
   session_id?: string;
+  /** The session's working directory; only its project label may be sent. */
+  cwd?: string;
   tool_name?: string;
   tool_use_id?: string;
   tool_input?: unknown;
@@ -19,7 +23,7 @@ export interface HookInput {
 
 export type HookStep =
   /** Open an alert for this prompt; a repeated event reuses it. */
-  | { op: 'notify'; correlation: string; title: string; body: string }
+  | { op: 'notify'; correlation: string; reason: AttentionReason }
   /** The prompt closed. */
   | { op: 'resolve'; correlation: string }
   /** Nothing earlier in the session is waiting any more. */
@@ -48,17 +52,9 @@ function toolCorrelation(input: HookInput): string {
 const ELICITATION = 'elicitation';
 const FINISHED = 'finished';
 
-function finishedSteps(host: string, options: HookOptions): HookStep[] {
+function finishedSteps(options: HookOptions): HookStep[] {
   return options.finished
-    ? [
-        { op: 'resolve-session' },
-        {
-          op: 'notify',
-          correlation: FINISHED,
-          title: `${host} is waiting for you`,
-          body: `${host} finished its turn. Return to your computer to continue.`,
-        },
-      ]
+    ? [{ op: 'resolve-session' }, { op: 'notify', correlation: FINISHED, reason: 'finished' }]
     : [{ op: 'resolve-session' }];
 }
 
@@ -72,28 +68,14 @@ export function claudeSteps(input: HookInput, options: HookOptions): HookStep[] 
         (options.alerts && !options.alerts.includes('questions'))
       )
         return [];
-      return [
-        {
-          op: 'notify',
-          correlation: toolCorrelation(input),
-          title: 'Claude Code needs your attention',
-          body: 'Return to your computer to answer a question in Claude Code.',
-        },
-      ];
+      return [{ op: 'notify', correlation: toolCorrelation(input), reason: 'question' }];
     case 'PermissionRequest': {
       if (options.alerts && !options.alerts.includes('permissions')) return [];
       if (!input.tool_name || input.tool_name === 'AskUserQuestion') return [];
       // Auto mode decides this one itself; the user is not asked.
       const auto = input.permission_context?.auto_response;
       if (auto === 'allow' || auto === 'deny') return [];
-      return [
-        {
-          op: 'notify',
-          correlation: toolCorrelation(input),
-          title: 'Claude Code needs your attention',
-          body: 'Return to your computer to review a permission request in Claude Code.',
-        },
-      ];
+      return [{ op: 'notify', correlation: toolCorrelation(input), reason: 'permission' }];
     }
     case 'PostToolUse':
     case 'PostToolUseFailure':
@@ -105,14 +87,7 @@ export function claudeSteps(input: HookInput, options: HookOptions): HookStep[] 
         input.notification_type === 'elicitation_url_dialog'
       ) {
         if (options.alerts && !options.alerts.includes('tool-input')) return [];
-        return [
-          {
-            op: 'notify',
-            correlation: ELICITATION,
-            title: 'Claude Code needs your attention',
-            body: 'Return to your computer: a tool in Claude Code is asking for input.',
-          },
-        ];
+        return [{ op: 'notify', correlation: ELICITATION, reason: 'input' }];
       }
       if (
         input.notification_type === 'elicitation_complete' ||
@@ -122,9 +97,7 @@ export function claudeSteps(input: HookInput, options: HookOptions): HookStep[] 
       }
       return [];
     case 'Stop':
-      return input.stop_hook_active
-        ? [{ op: 'resolve-session' }]
-        : finishedSteps('Claude Code', options);
+      return input.stop_hook_active ? [{ op: 'resolve-session' }] : finishedSteps(options);
     case 'UserPromptSubmit':
     case 'SessionEnd':
       return [{ op: 'resolve-session' }];
@@ -142,7 +115,7 @@ export function codexSteps(input: HookInput, options: HookOptions): HookStep[] {
   if (!input.session_id) return [];
   switch (input.hook_event_name) {
     case 'Stop':
-      return input.stop_hook_active ? [{ op: 'resolve-session' }] : finishedSteps('Codex', options);
+      return input.stop_hook_active ? [{ op: 'resolve-session' }] : finishedSteps(options);
     case 'UserPromptSubmit':
     case 'SessionStart':
     case 'SessionEnd':

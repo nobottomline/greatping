@@ -1,6 +1,9 @@
+import process from 'node:process';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
+  type AlertHost,
   type Answer,
+  type CreateRequestBody,
   type HostIntegration,
   LIMITS,
   type MachineMeResponse,
@@ -11,6 +14,7 @@ import WebSocket from 'ws';
 import { ApiError, api } from './api';
 import { UsageError } from './commands/usage';
 import { type Config, isPaired, loadConfig } from './config';
+import { projectFields } from './identity';
 import { hostIntegrations } from './integrations';
 
 function paired(): Config {
@@ -26,6 +30,39 @@ function bounded(signal?: AbortSignal, ms = 8000): AbortSignal {
   return AbortSignal.any([signal, deadline]);
 }
 
+/** Who sends an explicit question or message, and from which directory. */
+export interface Origin {
+  /** The MCP client's host, or `cli` for the command itself. */
+  host: AlertHost;
+  /** Its working directory; only a project label allowed by the user is sent. */
+  cwd?: string;
+}
+
+const COMMAND_ORIGIN: Origin = { host: 'cli' };
+
+/** Maps an MCP client's self-reported name to an alert host. */
+export function hostFromClientName(name: string | undefined): AlertHost {
+  const value = (name ?? '').toLowerCase();
+  if (value.includes('claude')) return 'claude-code';
+  if (value.includes('codex')) return 'codex';
+  if (value.includes('cursor')) return 'cursor';
+  if (value.includes('opencode')) return 'opencode';
+  if (value.includes('gemini')) return 'gemini-cli';
+  if (/^pi(\b|[-_])/.test(value)) return 'pi';
+  return 'other';
+}
+
+function originFields(origin: Origin): Pick<CreateRequestBody, 'host' | 'projectKey'> & {
+  projectLabel?: string;
+} {
+  const { projectKey, projectLabel } = projectFields(origin.cwd ?? process.cwd());
+  return {
+    host: origin.host,
+    ...(projectKey ? { projectKey } : {}),
+    ...(projectLabel ? { projectLabel } : {}),
+  };
+}
+
 export interface NoticeResult {
   requestId: string;
   status: 'accepted' | 'paused';
@@ -35,6 +72,7 @@ export async function sendNotice(
   message: string,
   title?: string,
   signal?: AbortSignal,
+  origin: Origin = COMMAND_ORIGIN,
 ): Promise<NoticeResult> {
   if (!message.trim() || message.length > LIMITS.bodyMaxLength)
     throw new UsageError(
@@ -43,13 +81,20 @@ export async function sendNotice(
     );
   if (title !== undefined && title.length > 100)
     throw new UsageError('notify', 'Titles are limited to 100 characters.');
-  const request = await api<PingRequest>(paired(), 'POST', '/requests', {
-    body: {
-      kind: 'notify',
+  const { projectLabel, ...source } = originFields(origin);
+  const body: CreateRequestBody = {
+    kind: 'notify',
+    ...source,
+    content: {
+      enc: 0,
       body: message.trim(),
       ...(title?.trim() ? { title: title.trim() } : {}),
-      timeoutSec: 300,
+      ...(projectLabel ? { projectLabel } : {}),
     },
+    timeoutSec: 300,
+  };
+  const request = await api<PingRequest>(paired(), 'POST', '/requests', {
+    body,
     signal: bounded(signal),
   });
   return { requestId: request.id, status: request.paused ? 'paused' : 'accepted' };
@@ -116,7 +161,11 @@ export async function askQuestion(
   question: string,
   choices: string[],
   timeoutSeconds: number,
-  options: { signal?: AbortSignal; onCreated?: (request: PingRequest) => void } = {},
+  options: {
+    signal?: AbortSignal;
+    onCreated?: (request: PingRequest) => void;
+    origin?: Origin;
+  } = {},
 ): Promise<QuestionResult> {
   if (!question.trim() || question.length > LIMITS.bodyMaxLength)
     throw new UsageError('ask', `Write a question of at most ${LIMITS.bodyMaxLength} characters.`);
@@ -132,13 +181,20 @@ export async function askQuestion(
   signal?.throwIfAborted();
   // Once creation begins, finish it even on cancellation so the returned ID can
   // be withdrawn. Aborting a POST can otherwise orphan a question on the phone.
-  const request = await api<PingRequest>(config, 'POST', '/requests', {
-    body: {
-      kind: 'ask',
+  const { projectLabel, ...source } = originFields(options.origin ?? COMMAND_ORIGIN);
+  const body: CreateRequestBody = {
+    kind: 'ask',
+    ...source,
+    content: {
+      enc: 0,
       body: question.trim(),
       choices: choices.map((choice) => choice.trim()),
-      timeoutSec: timeoutSeconds,
+      ...(projectLabel ? { projectLabel } : {}),
     },
+    timeoutSec: timeoutSeconds,
+  };
+  const request = await api<PingRequest>(config, 'POST', '/requests', {
+    body,
     signal: AbortSignal.timeout(8000),
   });
   try {

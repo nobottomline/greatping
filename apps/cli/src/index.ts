@@ -7,8 +7,11 @@ import { doctor } from './commands/doctor';
 import { hooks } from './commands/hooks';
 import { login, logout } from './commands/login';
 import { pause, resume } from './commands/pause';
+import { project } from './commands/project';
+import { run } from './commands/run';
 import { setup } from './commands/setup';
 import { status } from './commands/status';
+import { test } from './commands/test';
 import { uninstall } from './commands/uninstall';
 import { UsageError } from './commands/usage';
 import { runHook } from './integrations/runner';
@@ -92,6 +95,49 @@ const commands: Record<string, Command> = {
     ],
     run: (v, p) =>
       notify(p.join(' ') || undefined, { title: v.title as string, json: Boolean(v.json) }),
+  },
+  run: {
+    usage: 'greatping run [--on-fail] [--title <title>] -- <command> [args…]',
+    summary: 'Run a command and get an alert when it finishes',
+    details: [
+      'Runs the command in this terminal and alerts your devices when it ends,',
+      'with success or the exit code and how long it took. The alert names the',
+      'program and subcommand ("pnpm test"), never its arguments. Exits with',
+      'the command’s code; Ctrl+C alerts nobody. Put the command after --.',
+    ],
+    options: { 'on-fail': { type: 'boolean' }, title: { type: 'string' } },
+    flags: [
+      ['--on-fail', 'Alert only when the command fails'],
+      ['--title <title>', 'Name the alert instead of the command'],
+    ],
+    run: (v, p) => run(p, { onFail: Boolean(v['on-fail']), title: v.title as string }),
+  },
+  test: {
+    usage: 'greatping test [--json]',
+    summary: 'Send a test notification to your devices and report each one',
+    details: [
+      'Sends one test notification to every device of the account the way this',
+      'computer’s alerts reach them, then reports per device whether Apple or',
+      'Google accepted it, or why not. Accepted is as far as a server can know;',
+      'check that it appeared. Exits 0 when at least one device was reached.',
+    ],
+    options: { json: { type: 'boolean' } },
+    flags: [['--json', 'Print the result per device as JSON']],
+    run: (v) => test({ json: Boolean(v.json) }),
+  },
+  project: {
+    usage: 'greatping project [show|labels <folder|hidden>|name <name>|hide|reset|list] [--json]',
+    summary: 'Choose how alerts name the project they come from',
+    details: [
+      'Alerts can show the project an agent works in, e.g. "Codex · billing-api".',
+      'The label is the folder name of the git repository, or a name you choose;',
+      'nothing else about the project leaves this computer. Labels are hidden',
+      'until you turn them on with greatping project labels folder.',
+      'name, hide and reset apply to the project of the current directory.',
+    ],
+    options: { json: { type: 'boolean' } },
+    flags: [['--json', 'Print machine-readable output (show, list)']],
+    run: (v, p) => project(p[0], p.slice(1), { json: Boolean(v.json) }),
   },
   setup: {
     usage:
@@ -298,7 +344,9 @@ async function main(argv: string[]): Promise<number> {
     );
     return 1;
   }
-  if (rest.includes('--help') || rest.includes('-h')) {
+  const separator = rest.indexOf('--');
+  const own = separator === -1 ? rest : rest.slice(0, separator);
+  if (own.includes('--help') || own.includes('-h')) {
     printCommandHelp(name, target);
     return 0;
   }

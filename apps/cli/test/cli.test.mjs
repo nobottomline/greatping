@@ -201,3 +201,54 @@ test('a real redirect response cannot forward a credential or trigger a second r
     await new Promise((resolve) => relay.close(resolve));
   }
 });
+
+test('MCP client names map to alert hosts', async () => {
+  const { hostFromClientName } = await import('../src/operations.ts');
+  for (const [name, host] of [
+    ['claude-code', 'claude-code'],
+    ['codex-mcp-client', 'codex'],
+    ['cursor-vscode', 'cursor'],
+    ['opencode', 'opencode'],
+    ['gemini-cli-mcp-client', 'gemini-cli'],
+    ['pi', 'pi'],
+    ['pi-coding-agent', 'pi'],
+    ['pipeline-runner', 'other'],
+    [undefined, 'other'],
+  ]) {
+    assert.equal(hostFromClientName(name), host, String(name));
+  }
+});
+
+test('greatping project names, hides and resets the current project locally', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const { mkdirSync } = await import('node:fs');
+  const cli = new URL('../dist/index.js', import.meta.url).pathname;
+  const root = mkdtempSync(join(tmpdir(), 'greatping-project-'));
+  try {
+    const repo = join(root, 'acme-acquisition-2026');
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    mkdirSync(join(repo, 'web'));
+    const run = (...args) =>
+      spawnSync(process.execPath, [cli, 'project', ...args], {
+        cwd: join(repo, 'web'),
+        env: { PATH: process.env.PATH, HOME: root, XDG_CONFIG_HOME: join(root, '.config') },
+        encoding: 'utf8',
+      });
+    assert.equal(run('name', 'Client', 'A').status, 0);
+    const named = JSON.parse(run('show', '--json').stdout);
+    assert.equal(named.root.endsWith('acme-acquisition-2026'), true);
+    assert.deepEqual(named.override, { name: 'Client A' });
+    assert.equal(named.mode, 'hidden');
+    assert.equal(run('hide').status, 0);
+    assert.deepEqual(JSON.parse(run('list', '--json').stdout).projects[named.root], {
+      hidden: true,
+    });
+    assert.equal(run('reset').status, 0);
+    assert.deepEqual(JSON.parse(run('list', '--json').stdout).projects, {});
+    // Changing the computer's mode needs a pairing.
+    assert.notEqual(run('labels', 'folder').status, 0);
+    assert.notEqual(run('labels', 'sometimes').status, 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

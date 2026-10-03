@@ -1,7 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { ProjectLabels } from '@greatping/protocol';
 import { z } from 'zod';
 import { configDir, isPaired, loadConfig } from '../config';
+import { cachedProjectLabels } from '../identity';
 import { HOST_IDS, inspectHost } from '../integrations';
 import { CLAUDE_ALERTS, type ClaudeAlert } from '../integrations/events';
 import { HOSTS, installHooks, selectedAlerts, uninstallHooks } from '../integrations/host-hooks';
@@ -14,6 +16,7 @@ import type { HostId } from '../integrations/state';
 import { reportMachine } from '../report';
 import { type PickerItem, pickSetup } from '../setup-picker';
 import { color, command, confirm, interactive, muted, print, ui } from '../ui';
+import { setProjectLabels } from './project';
 import { UsageError } from './usage';
 
 export function parseHost(name: string | undefined, usage: string): HostId | null {
@@ -80,6 +83,19 @@ function initialSelection(id: HostId, options: SetupOptions): Selection {
         ? report.hooks.finished
         : (previous?.finished ?? (id === 'codex' && fresh))),
     mcp: id === 'codex' && (report.mcp.registered || fresh),
+  };
+}
+
+const PROJECT_ITEM = 'projects:labels';
+
+/** Whether alerts name their project ("Codex · billing-api"); off until chosen. */
+function projectItem(labels: ProjectLabels): PickerItem {
+  return {
+    id: PROJECT_ITEM,
+    group: 'Projects',
+    label: 'Show project folder names',
+    hint: 'Alerts name the git repository folder, e.g. "Codex · billing-api". Rename or hide a project with greatping project.',
+    selected: labels === 'folder',
   };
 }
 
@@ -281,7 +297,14 @@ export async function setup(target: string | undefined, options: SetupOptions): 
     print(`  ${muted('Choose which alerts reach your devices.')}`);
     print();
     selections = new Map(ids.map((id) => [id, initialSelection(id, options)]));
-    const selected = await pickSetup(pickerItems(ids, selections));
+    // Project labels are a setting of the paired computer; read it fresh first.
+    const paired = isPaired(loadConfig());
+    if (paired) await reportMachine(loadConfig());
+    const labels = cachedProjectLabels();
+    const selected = await pickSetup([
+      ...pickerItems(ids, selections),
+      ...(paired ? [projectItem(labels)] : []),
+    ]);
     if (selected === null) {
       ui.info('Setup cancelled. Nothing changed.');
       print();
@@ -291,6 +314,17 @@ export async function setup(target: string | undefined, options: SetupOptions): 
       selection.alerts = CLAUDE_ALERTS.filter((key) => selected.has(`${id}:${key}`));
       selection.finished = selected.has(`${id}:finished`);
       if (id === 'codex') selection.mcp = selected.has(`${id}:mcp`);
+    }
+    const wanted = selected.has(PROJECT_ITEM) ? 'folder' : 'hidden';
+    if (paired && wanted !== labels) {
+      try {
+        await setProjectLabels(wanted);
+      } catch (error) {
+        ui.error(
+          'Project labels were not changed',
+          error instanceof Error ? error.message : String(error),
+        );
+      }
     }
   }
   const changes = ids.flatMap((id) => {

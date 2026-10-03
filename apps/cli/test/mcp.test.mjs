@@ -78,7 +78,7 @@ async function session(mode, run, paired = true) {
     const init = await request('initialize', {
       protocolVersion: '2025-11-25',
       capabilities: {},
-      clientInfo: { name: 'test', version: '1' },
+      clientInfo: { name: 'codex-mcp-client', version: '1' },
     }).promise;
     assert.equal(init.error, undefined, JSON.stringify(init));
     notify('notifications/initialized');
@@ -167,7 +167,9 @@ test('MCP notify returns accepted/paused and supports titles without claiming de
         requestId: 'test-request',
         status: mode === 'paused' ? 'paused' : 'accepted',
       });
-      assert.equal(calls()[0].body.title, 'CI');
+      assert.equal(calls()[0].body.kind, 'notify');
+      assert.equal(calls()[0].body.host, 'codex');
+      assert.equal(calls()[0].body.content.title, 'CI');
       assert.doesNotMatch(result.content[0].text, /delivered|Notification sent/);
     });
 });
@@ -193,7 +195,8 @@ test('MCP questions distinguish answers and expiry and accept comma-bearing choi
       });
       assert.equal(result.structuredContent.status, mode);
       assert.equal(result.structuredContent.requestId, 'test-request');
-      assert.deepEqual(calls()[0].body.choices, ['Yes, continue', 'No']);
+      assert.deepEqual(calls()[0].body.content.choices, ['Yes, continue', 'No']);
+      assert.equal(calls()[0].body.host, 'codex');
       assert.equal(Boolean(result.isError), mode === 'expired');
     });
 });

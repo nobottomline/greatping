@@ -1,20 +1,18 @@
 import process from 'node:process';
-import { LIMITS } from '@greatping/protocol';
+import {
+  type AlertHost,
+  type CreateRequestBody,
+  LIMITS,
+  type ResolveRequestBody,
+  type ResolveRequestResponse,
+} from '@greatping/protocol';
 import { api } from '../api';
 import { type Config, isPaired, loadConfig } from '../config';
+import { correlationId, loadSettings, projectFields, readSettings, threadId } from '../identity';
 import { reportMachine } from '../report';
 import { type ClaudeAlert, claudeSteps, codexSteps, type HookInput, type HookStep } from './events';
 import { isAway } from './presence';
-import {
-  findAlert,
-  forgetAlert,
-  type HostId,
-  type OpenAlert,
-  openAlert,
-  pruneAlerts,
-  sessionAlerts,
-  touchHeartbeat,
-} from './state';
+import { forget, type HostId, markOpen, openedAgo, pruneAlerts, touchHeartbeat } from './state';
 
 /** The event `greatping doctor` sends to check that an installed hook runs. */
 export const PROBE_EVENT = 'GreatPingProbe';
@@ -41,18 +39,31 @@ export async function readHookInput(): Promise<HookInput | null> {
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function resolveAlert(config: Config, alert: OpenAlert): Promise<void> {
-  // The event that opened the alert runs in parallel and may not have reached
-  // the server yet; an unknown key is retried briefly before it is dropped.
+/** The alert host each hook host reports as. */
+export const ALERT_HOST: Record<HostId, AlertHost> = { claude: 'claude-code', codex: 'codex' };
+
+/**
+ * Hooks of one event run in parallel processes: the event that closes a
+ * prompt can reach the server before the one that opened it. A mark this
+ * young may still be on its way, so closing it is retried briefly.
+ */
+const RACE_WINDOW_MS = 10_000;
+
+async function resolveOnServer(
+  config: Config,
+  body: ResolveRequestBody,
+  openedAgoMs: number,
+): Promise<void> {
   for (let attempt = 1; ; attempt++) {
-    const result = await api<{ resolved: boolean }>(config, 'POST', '/requests/resolve', {
-      body: { sourceKey: alert.sourceKey },
+    const result = await api<ResolveRequestResponse>(config, 'POST', '/requests/resolve', {
+      body,
       signal: AbortSignal.timeout(3000),
     });
-    if (result.resolved || attempt === 3) break;
+    if (result.resolved > 0 || openedAgoMs + attempt * 1500 > RACE_WINDOW_MS || attempt === 3) {
+      return;
+    }
     await pause(1500);
   }
-  forgetAlert(alert);
 }
 
 export async function runSteps(
@@ -60,34 +71,49 @@ export async function runSteps(
   session: string,
   steps: HookStep[],
   config: Config,
+  cwd?: string,
 ): Promise<void> {
   const paired = isPaired(config);
+  const alertHost = ALERT_HOST[host];
+  // Without settings there is no secret yet, so nothing can have been opened here.
+  const settings = paired ? loadSettings() : readSettings();
+  if (!settings) return;
+  const thread = threadId(alertHost, session, settings.secret);
   for (const step of steps) {
     if (step.op === 'notify') {
       if (!paired) continue;
-      const alert = openAlert(host, session, step.correlation);
-      await api(config, 'POST', '/requests', {
-        body: {
-          kind: 'notify',
-          title: step.title,
-          body: step.body,
-          sourceKey: alert.sourceKey,
-          timeoutSec: LIMITS.attentionTimeoutSec,
-          away: isAway(),
-        },
-        signal: AbortSignal.timeout(3000),
-      });
+      const correlation = correlationId(alertHost, session, step.correlation, settings.secret);
+      markOpen(host, thread, correlation);
+      const { projectKey, projectLabel } = projectFields(cwd, settings);
+      const body: CreateRequestBody = {
+        kind: 'attention',
+        host: alertHost,
+        reason: step.reason,
+        thread,
+        correlation,
+        ...(projectKey ? { projectKey } : {}),
+        content: { enc: 0, ...(projectLabel ? { projectLabel } : {}) },
+        timeoutSec: LIMITS.attentionTimeoutSec,
+        away: isAway(),
+      };
+      await api(config, 'POST', '/requests', { body, signal: AbortSignal.timeout(3000) });
       continue;
     }
-    const alerts =
+    const correlation =
       step.op === 'resolve'
-        ? [findAlert(host, session, step.correlation)].filter((a): a is OpenAlert => a !== null)
-        : sessionAlerts(host, session);
-    if (!paired) {
-      alerts.forEach(forgetAlert);
-      continue;
+        ? correlationId(alertHost, session, step.correlation, settings.secret)
+        : undefined;
+    const age = openedAgo(host, thread, correlation);
+    // Nothing of this prompt or thread was opened here: no request at all.
+    if (age === null) continue;
+    if (paired) {
+      await resolveOnServer(
+        config,
+        { host: alertHost, thread, ...(correlation ? { correlation } : {}) },
+        age,
+      );
     }
-    await Promise.allSettled(alerts.map((alert) => resolveAlert(config, alert)));
+    forget(host, thread, correlation);
   }
 }
 
@@ -114,7 +140,7 @@ export async function runHook(
         : codexSteps(input, { finished: options.finished });
     const config = loadConfig();
     if (steps.length > 0 && input.session_id) {
-      await runSteps(host, input.session_id, steps, config);
+      await runSteps(host, input.session_id, steps, config, input.cwd);
     }
     if (steps.some((step) => step.op === 'resolve-session')) pruneAlerts();
     if (previousRun === null || Date.now() - previousRun > REPORT_INTERVAL_MS) {

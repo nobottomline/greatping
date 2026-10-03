@@ -18,6 +18,7 @@ Prefer GreatPing's MCP tools when the host lists them (`notify`, `ask_user`, `ge
 | Goal | MCP tool | CLI fallback |
 |---|---|---|
 | Send an alert | `notify` | `greatping notify "<message>" --title "<title>"` |
+| Alert when one long command ends | — | `greatping run -- <command>` (`--on-fail` for failures only) |
 | Ask and wait for an answer | `ask_user` | `greatping ask "<question>" --choices Yes,No --timeout 30m` |
 | Pause alerts from this computer | `pause_alerts` | `greatping pause 1h` (`30m`, `2h`, up to `7d`) |
 | Resume alerts | `resume_alerts` | `greatping resume` |
@@ -28,7 +29,7 @@ Prefer GreatPing's MCP tools when the host lists them (`notify`, `ask_user`, `ge
 
 ## When to use it
 
-- The user asks to be told when something finishes: run the work, then `notify` with the outcome, for example "Deploy finished: 3 services updated" or "Tests failed: 2 failures in api".
+- The user asks to be told when something finishes: run the work, then `notify` with the outcome, for example "Deploy finished: 3 services updated" or "Tests failed: 2 failures in api". When the work is one long shell command, `greatping run -- <command>` does this by itself (success or exit code and duration, exiting with the command's code); `notify` afterwards only if the user needs more than that.
 - The user says they will be away and wants to decide remotely: use `ask` with short choices and a timeout that fits their absence. Use the answer as their decision.
 - The user asks not to be disturbed ("no pings for an hour", "stop alerting me"): run `greatping pause <duration>`. When they want alerts again: `greatping resume`. Pausing silences this computer on all of the user's devices; requests still appear in the app's inbox.
 - Otherwise, do not send alerts on your own initiative.

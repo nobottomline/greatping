@@ -1,99 +1,72 @@
-import { createHash, randomUUID } from 'node:crypto';
-import {
-  closeSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  utimesSync,
-  writeFileSync,
-} from 'node:fs';
+import { mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LIMITS } from '@greatping/protocol';
 import { configDir } from '../config';
 
 /**
- * Local memory of the alerts a host's hooks opened, so the event that closes a
- * prompt can resolve the same alert. Each open alert is one file holding its
- * source key: `hook-state/<host>/<session>/<alert>`. Names are hashes; nothing
- * from the prompt is stored.
+ * Local marks of the alerts a host's hooks opened, so the events that close a
+ * prompt reach the server only when something may be open. The server owns
+ * the alerts; a mark is an empty file `hook-state/<host>/<thread>/<prompt>`
+ * named by the opaque ids that were sent. Nothing from the prompt is stored.
  */
 
 export type HostId = 'claude' | 'codex';
-
-export interface OpenAlert {
-  sourceKey: string;
-  path: string;
-}
-
-const hash = (value: string) => createHash('sha256').update(value).digest('hex').slice(0, 32);
 
 function root(): string {
   return join(configDir(), 'hook-state');
 }
 
-function sessionDir(host: HostId, session: string): string {
-  return join(root(), host, hash(session));
+function threadDir(host: HostId, thread: string): string {
+  return join(root(), host, thread);
 }
 
-function alertPath(host: HostId, session: string, correlation: string): string {
-  return join(sessionDir(host, session), hash(correlation));
+/**
+ * Marks a prompt's alert as open. The server keeps one open alert per thread,
+ * so earlier marks of the thread are dropped with it.
+ */
+export function markOpen(host: HostId, thread: string, correlation: string): void {
+  const dir = threadDir(host, thread);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  for (const name of readdirSafe(dir))
+    if (name !== correlation) rmSync(join(dir, name), { force: true });
+  writeFileSync(join(dir, correlation), '', { mode: 0o600 });
 }
 
-function readKey(path: string): string | null {
-  try {
-    return readFileSync(path, 'utf8').trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-/** The alert for this prompt, created on first sight; a retried event reuses it. */
-export function openAlert(host: HostId, session: string, correlation: string): OpenAlert {
-  const path = alertPath(host, session, correlation);
-  mkdirSync(sessionDir(host, session), { recursive: true, mode: 0o700 });
-  const sourceKey = `${host}:${randomUUID()}`;
-  try {
-    const fd = openSync(path, 'wx', 0o600);
+/** How long ago the prompt's alert was opened here, or null if it is not marked. */
+export function openedAgo(
+  host: HostId,
+  thread: string,
+  correlation?: string,
+  now = Date.now(),
+): number | null {
+  const dir = threadDir(host, thread);
+  const names = correlation ? [correlation] : readdirSafe(dir);
+  let newest: number | null = null;
+  for (const name of names) {
     try {
-      writeFileSync(fd, sourceKey);
-    } finally {
-      closeSync(fd);
+      const mtime = statSync(join(dir, name)).mtimeMs;
+      newest = newest === null ? mtime : Math.max(newest, mtime);
+    } catch {
+      // Not marked.
     }
-    return { sourceKey, path };
-  } catch (error) {
-    const existing = readKey(path);
-    if (existing) return { sourceKey: existing, path };
-    throw error;
   }
+  return newest === null ? null : Math.max(0, now - newest);
 }
 
-export function findAlert(host: HostId, session: string, correlation: string): OpenAlert | null {
-  const path = alertPath(host, session, correlation);
-  const sourceKey = readKey(path);
-  return sourceKey ? { sourceKey, path } : null;
-}
-
-/** Every alert a session still has open. */
-export function sessionAlerts(host: HostId, session: string): OpenAlert[] {
-  const dir = sessionDir(host, session);
-  let names: string[];
-  try {
-    names = readdirSync(dir);
-  } catch {
-    return [];
-  }
-  return names.flatMap((name) => {
-    const path = join(dir, name);
-    const sourceKey = readKey(path);
-    return sourceKey ? [{ sourceKey, path }] : [];
+/** Forgets one prompt's mark, or the whole thread's. */
+export function forget(host: HostId, thread: string, correlation?: string): void {
+  rmSync(correlation ? join(threadDir(host, thread), correlation) : threadDir(host, thread), {
+    recursive: true,
+    force: true,
   });
 }
 
-export function forgetAlert(alert: OpenAlert): void {
-  rmSync(alert.path, { force: true });
+function readdirSafe(dir: string): string[] {
+  try {
+    return readdirSync(dir);
+  } catch {
+    return [];
+  }
 }
 
 /**

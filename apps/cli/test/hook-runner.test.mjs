@@ -78,14 +78,13 @@ for (const entrypoint of [undefined, 'cli', 'sdk-ts', 'sdk-py', 'sdk-cli', 'cust
       assert.equal(calls.length, 1);
       assert.equal(calls[0].path, '/v1/requests');
       assert.equal(calls[0].entrypoint, entrypoint ?? null);
-      assert.equal(calls[0].body.kind, 'notify');
-      assert.equal(calls[0].body.title, 'Claude Code is waiting for you');
-      assert.equal(
-        calls[0].body.body,
-        'Claude Code finished its turn. Return to your computer to continue.',
-      );
-      assert.ok(calls[0].body.sourceKey);
+      assert.equal(calls[0].body.kind, 'attention');
+      assert.equal(calls[0].body.host, 'claude-code');
+      assert.equal(calls[0].body.reason, 'finished');
+      assert.deepEqual(calls[0].body.content, { enc: 0 });
+      assert.ok(calls[0].body.thread);
       assert.ok(!JSON.stringify(calls).includes('private reply'));
+      assert.ok(!JSON.stringify(calls).includes(stop.session_id));
     });
   });
 }
@@ -106,7 +105,7 @@ test('SDK hooks resolve completion alerts when the next prompt arrives', () => {
     );
     assert.equal(calls.length, 2);
     assert.equal(calls[1].path, '/v1/requests/resolve');
-    assert.deepEqual(calls[1].body, { sourceKey: opened.body.sourceKey });
+    assert.deepEqual(calls[1].body, { host: 'claude-code', thread: opened.body.thread });
   });
 });
 
@@ -116,7 +115,7 @@ test('a recursive Stop resolves the SDK alert without opening another', () => {
     const calls = hook({ ...stop, stop_hook_active: true }, { entrypoint: 'sdk-ts' });
     assert.equal(calls.length, 2);
     assert.equal(calls[1].path, '/v1/requests/resolve');
-    assert.deepEqual(calls[1].body, { sourceKey: opened.body.sourceKey });
+    assert.deepEqual(calls[1].body, { host: 'claude-code', thread: opened.body.thread });
   });
 });
 

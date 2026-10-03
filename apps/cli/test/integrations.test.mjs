@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { DEFAULT_API_URL } from '../src/config.ts';
+import { projectFields, rememberProjectLabels, setProjectOverride } from '../src/identity.ts';
 import { claudeSteps, codexSteps } from '../src/integrations/events.ts';
 import {
   HOSTS,
@@ -33,11 +34,11 @@ import { codexMcpServer } from '../src/integrations/mcp.ts';
 import { runSteps } from '../src/integrations/runner.ts';
 import { installSkill, skillInstalled, uninstallSkill } from '../src/integrations/skill.ts';
 import {
-  findAlert,
+  forget,
   lastHookAt,
-  openAlert,
+  markOpen,
+  openedAgo,
   pruneAlerts,
-  sessionAlerts,
   touchHeartbeat,
 } from '../src/integrations/state.ts';
 
@@ -109,9 +110,9 @@ test('Claude question and permission alerts are generic and close with their pro
     tool_input: { questions: [{ question: 'Which secret stack?' }] },
   };
   const [open] = claudeSteps(question, defaultOptions);
-  assert.equal(open.op, 'notify');
-  // Only title and body reach the server; the correlation is hashed locally.
-  assert.doesNotMatch(`${open.title} ${open.body}`, /secret stack/);
+  // A step says why the host waits, never what about; the correlation is hashed before sending.
+  assert.deepEqual(Object.keys(open).sort(), ['correlation', 'op', 'reason']);
+  assert.equal(open.reason, 'question');
   const [close] = claudeSteps({ ...question, hook_event_name: 'PostToolUse' }, defaultOptions);
   assert.deepEqual(close, { op: 'resolve', correlation: open.correlation });
 
@@ -123,7 +124,7 @@ test('Claude question and permission alerts are generic and close with their pro
   };
   const [ask] = claudeSteps(permission, defaultOptions);
   assert.equal(ask.op, 'notify');
-  assert.doesNotMatch(`${ask.title} ${ask.body}`, /rm -rf/);
+  assert.equal(ask.reason, 'permission');
   // The tool result gains an ID the permission request may not have had.
   const [done] = claudeSteps(
     { ...permission, hook_event_name: 'PostToolUseFailure', tool_use_id: 'x' },
@@ -221,7 +222,7 @@ test('Codex alerts at the end of a turn and clears when the user is back', () =>
     steps.map((step) => step.op),
     ['resolve-session', 'notify'],
   );
-  assert.match(steps[1].title, /Codex/);
+  assert.equal(steps[1].reason, 'finished');
   for (const event of ['UserPromptSubmit', 'SessionStart', 'SessionEnd']) {
     assert.deepEqual(codexSteps({ hook_event_name: event, session_id: 'c' }, on), [
       { op: 'resolve-session' },
@@ -230,28 +231,59 @@ test('Codex alerts at the end of a turn and clears when the user is back', () =>
   assert.deepEqual(codexSteps({ hook_event_name: 'PreToolUse', session_id: 'c' }, on), []);
 });
 
-test('alert state is per session, reused on retry and pruned when stale', async () => {
+test('alert marks are per thread, one prompt open at a time, and pruned when stale', async () => {
   await withHome((root) => {
-    const first = openAlert('claude', 's1', 'a');
-    assert.equal(openAlert('claude', 's1', 'a').sourceKey, first.sourceKey);
-    openAlert('claude', 's1', 'b');
-    openAlert('claude', 's2', 'a');
-    assert.equal(sessionAlerts('claude', 's1').length, 2);
-    assert.equal(sessionAlerts('codex', 's1').length, 0);
-    assert.equal(findAlert('claude', 's2', 'a').sourceKey.startsWith('claude:'), true);
+    markOpen('claude', 'thread-a', 'prompt-1');
+    assert.ok(openedAgo('claude', 'thread-a', 'prompt-1') < 1000);
+    // The server keeps one open alert per thread; so do the marks.
+    markOpen('claude', 'thread-a', 'prompt-2');
+    assert.equal(openedAgo('claude', 'thread-a', 'prompt-1'), null);
+    assert.notEqual(openedAgo('claude', 'thread-a'), null);
+    markOpen('claude', 'thread-b', 'prompt-1');
+    assert.equal(openedAgo('codex', 'thread-a'), null);
+    forget('claude', 'thread-a');
+    assert.equal(openedAgo('claude', 'thread-a'), null);
+    assert.notEqual(openedAgo('claude', 'thread-b', 'prompt-1'), null);
 
     const legacy = join(root, '.config', 'greatping', 'hook-state', 'abc123');
     writeFileSync(legacy, 'claude:old');
+    const mark = join(root, '.config', 'greatping', 'hook-state', 'claude', 'thread-b', 'prompt-1');
     const old = Date.now() / 1000 - 8 * 24 * 3600;
-    utimesSync(first.path, old, old);
+    utimesSync(mark, old, old);
     pruneAlerts();
     assert.equal(existsSync(legacy), false);
-    assert.equal(findAlert('claude', 's1', 'a'), null);
-    assert.notEqual(findAlert('claude', 's1', 'b'), null);
+    assert.equal(openedAgo('claude', 'thread-b'), null);
 
     assert.equal(lastHookAt('codex'), null);
     assert.equal(touchHeartbeat('codex'), null);
     assert.ok(lastHookAt('codex') <= Date.now());
+  });
+});
+
+test('project labels follow the computer mode and per-project overrides', async () => {
+  await withHome((root) => {
+    const repo = join(root, 'acme-acquisition-2026');
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    mkdirSync(join(repo, 'packages', 'api'), { recursive: true });
+    const inside = join(repo, 'packages', 'api');
+    // Hidden until the user turns labels on.
+    assert.deepEqual(projectFields(inside), {});
+    rememberProjectLabels('folder');
+    const shown = projectFields(inside);
+    assert.equal(shown.projectLabel, 'acme-acquisition-2026');
+    assert.match(shown.projectKey, /^[A-Za-z0-9_-]{22}$/);
+    assert.doesNotMatch(JSON.stringify(shown), /packages|Users|\//);
+    // The same project from another directory has the same key.
+    assert.equal(projectFields(repo).projectKey, shown.projectKey);
+
+    setProjectOverride(repo, { name: 'Client A' });
+    assert.equal(projectFields(inside).projectLabel, 'Client A');
+    setProjectOverride(repo, { hidden: true });
+    assert.deepEqual(projectFields(inside), {});
+    setProjectOverride(repo, null);
+    rememberProjectLabels('hidden');
+    assert.deepEqual(projectFields(inside), {});
+    assert.deepEqual(projectFields(join(root, 'missing')), {});
   });
 });
 
@@ -453,14 +485,14 @@ async function fakeServer(handler) {
 }
 
 test('hook steps open, retry and resolve alerts on the server', async () => {
-  await withHome(async () => {
+  await withHome(async (root) => {
     const server = await fakeServer((call, calls) => {
       if (call.path === '/v1/requests/resolve') {
         // The first resolve races ahead of its alert; the retry finds it.
         const attempts = calls.filter(
-          (c) => c.path === call.path && c.body.sourceKey === call.body.sourceKey,
+          (c) => c.path === call.path && c.body.thread === call.body.thread,
         ).length;
-        return { resolved: attempts > 1 };
+        return { resolved: attempts > 1 ? 1 : 0 };
       }
       return { id: 'req_1', status: 'pending' };
     });
@@ -471,27 +503,40 @@ test('hook steps open, retry and resolve alerts on the server', async () => {
     };
     try {
       const config = { apiUrl: DEFAULT_API_URL, machineId: 'm', machineToken: 't' };
+      const project = join(root, 'billing-api');
+      mkdirSync(join(project, '.git'), { recursive: true });
+      rememberProjectLabels('folder');
       const question = claudeSteps(
         {
           hook_event_name: 'PreToolUse',
-          session_id: 'sess',
+          session_id: 'sess-uuid',
           tool_name: 'AskUserQuestion',
-          tool_use_id: 'q1',
+          tool_use_id: 'toolu_secret',
         },
         defaultOptions,
       );
-      await runSteps('claude', 'sess', question, config);
+      await runSteps('claude', 'sess-uuid', question, config, project);
       const created = server.calls.find((c) => c.path === '/v1/requests');
-      assert.equal(created.body.kind, 'notify');
+      assert.equal(created.body.kind, 'attention');
+      assert.equal(created.body.host, 'claude-code');
+      assert.equal(created.body.reason, 'question');
+      assert.match(created.body.thread, /^[A-Za-z0-9_-]{22}$/);
+      assert.match(created.body.correlation, /^[A-Za-z0-9_-]{22}$/);
+      assert.deepEqual(created.body.content, { enc: 0, projectLabel: 'billing-api' });
       assert.equal(typeof created.body.away, 'boolean');
-      assert.match(created.body.sourceKey, /^claude:/);
-      assert.equal(sessionAlerts('claude', 'sess').length, 1);
+      // Raw session and tool ids and paths stay on the computer.
+      assert.doesNotMatch(JSON.stringify(created.body), /sess-uuid|toolu_secret|\//);
 
-      await runSteps('claude', 'sess', [{ op: 'resolve-session' }], config);
+      await runSteps('claude', 'sess-uuid', [{ op: 'resolve-session' }], config, project);
       const resolves = server.calls.filter((c) => c.path === '/v1/requests/resolve');
       assert.equal(resolves.length, 2);
-      assert.equal(resolves[0].body.sourceKey, created.body.sourceKey);
-      assert.equal(sessionAlerts('claude', 'sess').length, 0);
+      assert.deepEqual(resolves[0].body, { host: 'claude-code', thread: created.body.thread });
+      assert.equal(openedAgo('claude', created.body.thread), null);
+
+      // Nothing open here: closing events cost no request.
+      await runSteps('claude', 'sess-uuid', [{ op: 'resolve-session' }], config, project);
+      await runSteps('claude', 'sess-uuid', [{ op: 'resolve', correlation: 'x' }], config);
+      assert.equal(server.calls.filter((c) => c.path === '/v1/requests/resolve').length, 2);
     } finally {
       globalThis.fetch = originalFetch;
       await server.close();
@@ -501,9 +546,10 @@ test('hook steps open, retry and resolve alerts on the server', async () => {
 
 test('an unpaired computer only forgets local alerts', async () => {
   await withHome(async () => {
-    openAlert('codex', 'x', 'finished');
-    await runSteps('codex', 'x', [{ op: 'resolve-session' }], { apiUrl: 'http://127.0.0.1:9' });
-    assert.equal(sessionAlerts('codex', 'x').length, 0);
+    const steps = codexSteps({ hook_event_name: 'Stop', session_id: 'x' }, { finished: true });
+    const offline = { apiUrl: 'http://127.0.0.1:9' };
+    await runSteps('codex', 'x', steps, offline);
+    await runSteps('codex', 'x', [{ op: 'resolve-session' }], offline);
   });
 });
 
@@ -580,5 +626,143 @@ test('install and uninstall preserve foreign handlers sharing a GreatPing hook g
     assert.deepEqual(JSON.parse(readFileSync(host.settingsPath(), 'utf8')).hooks, {
       PostToolUse: [{ matcher: '.*', hooks: [foreign] }],
     });
+  });
+});
+
+test('greatping test reports each device once Apple or Google answer', async () => {
+  const { describeDevice } = await import('../src/commands/test.ts');
+  const { execFile } = await import('node:child_process');
+  const device = (fields) => ({
+    deviceId: 'd',
+    name: 'iPhone',
+    platform: 'ios',
+    mode: 'first',
+    ...fields,
+  });
+  await withHome(async (root) => {
+    const server = await fakeServer((call) =>
+      call.method === 'POST'
+        ? { id: 'pt_1', createdAt: 1, pending: true, devices: [device({ status: 'sending' })] }
+        : { id: 'pt_1', createdAt: 1, pending: false, devices: [device({ status: 'accepted' })] },
+    );
+    try {
+      mkdirSync(join(root, '.config', 'greatping'), { recursive: true });
+      writeFileSync(
+        join(root, '.config', 'greatping', 'config.json'),
+        JSON.stringify({ apiUrl: DEFAULT_API_URL, machineId: 'm', machineToken: 't' }),
+      );
+      // The real command in its own process, its service URL sent to the fake server.
+      const redirect = join(root, 'redirect.mjs');
+      writeFileSync(
+        redirect,
+        `const f = globalThis.fetch; globalThis.fetch = (u, o) => f(String(u).replace(${JSON.stringify(DEFAULT_API_URL)}, ${JSON.stringify(server.url)}), o);`,
+      );
+      const cli = new URL('../dist/index.js', import.meta.url).pathname;
+      const { stdout } = await new Promise((resolve, reject) =>
+        execFile(
+          process.execPath,
+          ['--import', redirect, cli, 'test', '--json'],
+          { env: { PATH: process.env.PATH, HOME: root, XDG_CONFIG_HOME: join(root, '.config') } },
+          (error, out, err) => (error ? reject(error) : resolve({ stdout: out, stderr: err })),
+        ),
+      );
+      assert.equal(JSON.parse(stdout).devices[0].status, 'accepted');
+      assert.deepEqual(
+        server.calls.map((c) => [c.method, c.path]),
+        [
+          ['POST', '/v1/machine/me/test'],
+          ['GET', '/v1/push-tests/pt_1'],
+        ],
+      );
+    } finally {
+      await server.close();
+    }
+  });
+  assert.match(describeDevice(device({ status: 'accepted' })).line, /accepted by Apple/);
+  const refused = describeDevice(
+    device({
+      platform: 'android',
+      status: 'failed',
+      reason: 'credentials',
+      detail: 'InvalidCredentials',
+    }),
+  );
+  assert.match(refused.line, /refused.*InvalidCredentials/);
+  assert.match(refused.hint, /Google refused GreatPing’s push credentials/);
+  assert.match(
+    describeDevice(device({ status: 'skipped', reason: 'off', mode: 'off' })).line,
+    /Off for this computer/,
+  );
+  assert.match(
+    describeDevice(device({ status: 'skipped', reason: 'no_token' })).hint,
+    /allow notifications/,
+  );
+});
+
+test('greatping run alerts once with the outcome, never the arguments, and keeps the exit code', async () => {
+  const { commandLabel, durationText } = await import('../src/commands/run.ts');
+  const { execFile } = await import('node:child_process');
+  assert.equal(commandLabel(['/usr/local/bin/pnpm', 'test', '--filter', 'secret']), 'pnpm test');
+  assert.equal(commandLabel(['node', '-e', 'process.exit(1)']), 'node');
+  assert.equal(commandLabel(['./deploy.sh', '--token=abc']), 'deploy.sh');
+  assert.equal(durationText(45_000), '45s');
+  assert.equal(durationText(252_000), '4m 12s');
+  assert.equal(durationText(3_780_000), '1h 3m');
+
+  await withHome(async (root) => {
+    const server = await fakeServer(() => ({ id: 'req_1', status: 'pending' }));
+    const redirect = join(root, 'redirect.mjs');
+    writeFileSync(
+      redirect,
+      `const f = globalThis.fetch; globalThis.fetch = (u, o) => f(String(u).replace(${JSON.stringify(DEFAULT_API_URL)}, ${JSON.stringify(server.url)}), o);`,
+    );
+    const cli = new URL('../dist/index.js', import.meta.url).pathname;
+    const env = { PATH: process.env.PATH, HOME: root, XDG_CONFIG_HOME: join(root, '.config') };
+    const greatping = (...args) =>
+      new Promise((resolve) =>
+        execFile(
+          process.execPath,
+          ['--import', redirect, cli, ...args],
+          { env },
+          (error, stdout, stderr) => resolve({ code: error ? error.code : 0, stdout, stderr }),
+        ),
+      );
+    try {
+      // Unpaired: the command still runs and keeps its code; the alert is only a warning.
+      const unpaired = await greatping('run', '--', process.execPath, '-e', 'process.exit(4)');
+      assert.equal(unpaired.code, 4);
+      assert.match(unpaired.stderr, /could not send the alert/);
+
+      mkdirSync(join(root, '.config', 'greatping'), { recursive: true });
+      writeFileSync(
+        join(root, '.config', 'greatping', 'config.json'),
+        JSON.stringify({ apiUrl: DEFAULT_API_URL, machineId: 'm', machineToken: 't' }),
+      );
+      const failed = await greatping('run', '--', process.execPath, '-e', 'process.exit(3)');
+      assert.equal(failed.code, 3);
+      const alert = server.calls.at(-1).body;
+      assert.equal(alert.kind, 'notify');
+      assert.equal(alert.host, 'cli');
+      assert.equal(alert.content.title, 'node failed');
+      assert.match(alert.content.body, /^Exit code 3 after \d+s\.$/);
+      assert.doesNotMatch(JSON.stringify(alert), /process\.exit/);
+
+      const quiet = server.calls.length;
+      const fine = await greatping('run', '--on-fail', '--', process.execPath, '-e', '');
+      assert.equal(fine.code, 0);
+      assert.equal(server.calls.length, quiet);
+
+      // Flags after -- belong to the command, not to GreatPing.
+      const help = await greatping('run', '--title', 'Node help', '--', process.execPath, '--help');
+      assert.equal(help.code, 0);
+      assert.match(help.stdout, /Usage: node/);
+      assert.equal(server.calls.at(-1).body.content.title, 'Node help succeeded');
+      assert.equal(server.calls.at(-1).body.content.body.startsWith('Finished in '), true);
+
+      const missing = await greatping('run', '--', 'definitely-not-a-command-xyz');
+      assert.equal(missing.code, 127);
+    } finally {
+      await server.close();
+    }
   });
 });
