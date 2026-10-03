@@ -1,6 +1,6 @@
 {
   "name": "greatping",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Get an alert on your phone when your coding agent needs you",
   "keywords": [
     "cli",

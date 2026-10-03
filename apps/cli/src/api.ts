@@ -1,4 +1,5 @@
 import { type Config, requireServer } from './config';
+import { VERSION } from './version';
 
 /** API failure with the server's error code when there is one. */
 export class ApiError extends Error {
@@ -27,7 +28,11 @@ export async function api<T>(
 ): Promise<T> {
   requireServer(config);
   const token = options.token === undefined ? config.machineToken : options.token;
-  const headers: Record<string, string> = { accept: 'application/json' };
+  // The version lets the server turn away a client it no longer supports with a clear message.
+  const headers: Record<string, string> = {
+    accept: 'application/json',
+    'x-greatping-client': `cli/${VERSION}`,
+  };
   if (token) headers.authorization = `Bearer ${token}`;
   if (options.body !== undefined) headers['content-type'] = 'application/json';
 
