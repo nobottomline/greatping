@@ -1,6 +1,6 @@
 {
   "name": "greatping",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Get an alert on your phone when your coding agent needs you",
   "keywords": [
     "cli",
@@ -37,7 +37,7 @@
     "dev": "tsdown --watch",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && node --experimental-transform-types --no-warnings --import ./test/ts-resolve.mjs --test test/*.test.mjs",
-    "test:interactive": "python3 test/interactive-smoke.py",
+    "test:interactive": "python3 test/interactive-smoke.py && python3 test/terminal-smoke.py",
     "test:package": "pnpm build && node test/package-smoke.mjs"
   },
   "dependencies": {

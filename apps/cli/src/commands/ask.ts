@@ -34,12 +34,17 @@ export async function ask(
   const started = Date.now();
   let progress: ReturnType<typeof spinner> | undefined;
   let ticker: ReturnType<typeof setInterval> | undefined;
+  const stopProgress = () => {
+    clearInterval(ticker);
+    progress?.stop();
+  };
   try {
     const result = await askQuestion(question, choices, timeout, {
       signal: controller.signal,
       allowText: options.allowText === true,
       onCreated(request) {
         warnIfPaused(request);
+        if (options.json) return;
         progress = spinner('Waiting for your answer in GreatPing');
         ticker = setInterval(
           () =>
@@ -50,6 +55,8 @@ export async function ask(
         );
       },
     });
+    // Finish transient output before either stream receives the final result.
+    stopProgress();
     if (options.json) process.stdout.write(`${JSON.stringify(result)}\n`);
     if (exitCode) {
       ui.warn('Question withdrawn.');
@@ -65,8 +72,7 @@ export async function ask(
     }
     return 0;
   } finally {
-    clearInterval(ticker);
-    progress?.stop();
+    stopProgress();
     process.off('SIGINT', interrupt);
     process.off('SIGTERM', terminate);
   }

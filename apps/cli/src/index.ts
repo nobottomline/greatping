@@ -17,6 +17,7 @@ import { UsageError } from './commands/usage';
 import { runHook } from './integrations/runner';
 import { startMcp } from './mcp';
 import { color, command, muted, print, ui } from './ui';
+import { prepareUpdateNotice } from './updates';
 import { MIN_NODE_VERSION, supportsNodeVersion, VERSION } from './version';
 
 type Options = Record<string, { type: 'string' | 'boolean'; short?: string }>;
@@ -284,9 +285,10 @@ function printHelp(): void {
   for (const [name, c] of visible) print(`    ${command(name.padEnd(width))}  ${c.summary}`);
   print();
   print(`  ${color.bold('Options')}`);
-  print(`    ${command('--no-color')}      Plain output (also NO_COLOR=1)`);
-  print(`    ${command('-h, --help')}      Help for a command: greatping <command> --help`);
-  print(`    ${command('-v, --version')}   Print the version`);
+  print(`    ${command('--no-color')}         Plain output (also NO_COLOR=1)`);
+  print(`    ${command('--no-update-check')}  Skip npm update checks (also NO_UPDATE_NOTIFIER=1)`);
+  print(`    ${command('-h, --help')}         Help for a command: greatping <command> --help`);
+  print(`    ${command('-v, --version')}      Print the version`);
   print();
   print(`  ${muted(`Get started with ${command('greatping login')}.`)}`);
   print();
@@ -319,7 +321,12 @@ async function main(argv: string[]): Promise<number> {
       `GreatPing requires Node.js ${MIN_NODE_VERSION} or later. Upgrade Node.js first.`,
     );
   }
-  const [name, ...rest] = argv.filter((arg) => arg !== '--no-color');
+  const separatorIndex = argv.indexOf('--');
+  const [name, ...rest] = argv.filter(
+    (arg, index) =>
+      arg !== '--no-color' &&
+      (arg !== '--no-update-check' || (separatorIndex !== -1 && index > separatorIndex)),
+  );
   if (!name || name === '-h' || name === '--help' || name === 'help') {
     const topic = name === 'help' ? rest[0] : undefined;
     const target = topic ? commands[topic] : undefined;
@@ -374,7 +381,11 @@ async function main(argv: string[]): Promise<number> {
   );
 }
 
-main(process.argv.slice(2))
+const argv = process.argv.slice(2);
+const showUpdateNotice = supportsNodeVersion(process.versions.node)
+  ? prepareUpdateNotice(argv)
+  : () => {};
+main(argv)
   .then((code) => {
     process.exitCode = code;
   })
@@ -398,4 +409,5 @@ main(process.argv.slice(2))
         print(muted(error.stack));
     }
     process.exitCode = 1;
-  });
+  })
+  .finally(showUpdateNotice);

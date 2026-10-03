@@ -1,5 +1,6 @@
 import process from 'node:process';
 import { createInterface } from 'node:readline';
+import { stripVTControlCharacters } from 'node:util';
 import { createColors } from 'picocolors';
 
 /**
@@ -22,7 +23,8 @@ function colorSupported(): boolean {
 
 export const colorEnabled = colorSupported();
 export const color = createColors(colorEnabled);
-export const interactive = Boolean(out.isTTY && process.stdin.isTTY) && !env.CI;
+export const interactive =
+  Boolean(out.isTTY && process.stdin.isTTY) && !env.CI && env.TERM !== 'dumb';
 
 const unicode = process.platform !== 'win32' || Boolean(env.WT_SESSION || env.TERM_PROGRAM);
 const glyph = {
@@ -94,8 +96,27 @@ export function spinner(text: string): Spinner {
   if (!interactive) return { update() {}, stop() {} };
   let label = text;
   let frame = 0;
+  let renderedWidth = 0;
+  const clear = () => {
+    // A terminal can reflow the last frame onto more rows when resized.
+    const rows = Math.ceil(renderedWidth / Math.max(1, out.columns ?? 80));
+    out.write('\r\x1b[2K');
+    for (let row = 1; row < rows; row++) out.write('\x1b[1A\r\x1b[2K');
+    renderedWidth = 0;
+  };
   const render = () => {
-    out.write(`\r\x1b[2K  ${color.cyan(frames[frame % frames.length] ?? '')} ${label}`);
+    clear();
+    // Spinner labels are internal Latin text. Leave the last column unused so
+    // automatic wrapping cannot strand a previous frame in scrollback.
+    const width = Math.max(0, (out.columns ?? 80) - 5);
+    const singleLine = label.replace(/[\r\n\t]/g, ' ');
+    const plain = stripVTControlCharacters(singleLine);
+    const fitted =
+      plain.length <= width ? singleLine : `${plain.slice(0, Math.max(0, width - 1))}…`;
+    if ((out.columns ?? 80) > 5) {
+      out.write(`  ${color.cyan(frames[frame % frames.length] ?? '')} ${fitted}`);
+      renderedWidth = 4 + stripVTControlCharacters(fitted).length;
+    }
     frame++;
   };
   out.write('\x1b[?25l');
@@ -112,7 +133,7 @@ export function spinner(text: string): Spinner {
       if (stopped) return;
       stopped = true;
       clearInterval(timer);
-      out.write('\r\x1b[2K');
+      clear();
       restore();
       process.off('exit', restore);
     },

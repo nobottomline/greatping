@@ -111,6 +111,7 @@ export async function uninstall(options: UninstallOptions): Promise<number> {
   const local: RemovalAction[] = [
     'config.json',
     'setup-options.json',
+    'update-check.json',
     'hook-state',
     'installation.json',
   ]

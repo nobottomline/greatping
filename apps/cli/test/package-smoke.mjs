@@ -89,8 +89,10 @@ try {
     ],
     { env, stdio: 'inherit' },
   );
-  if (process.platform !== 'win32')
+  if (process.platform !== 'win32') {
     run('python3', ['test/interactive-smoke.py'], { env, stdio: 'inherit' });
+    run('python3', ['test/terminal-smoke.py'], { env, stdio: 'inherit' });
+  }
   console.log(`Installed npm archive passed on Node ${process.versions.node}.`);
 } finally {
   rmSync(temporary, { recursive: true, force: true });

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -129,6 +130,8 @@ test('uninstall preserves foreign hooks, MCP and files, revokes pairing and is r
   home(({ root, bin, exec }) => {
     const foreign = integrations(root, bin);
     pair(root);
+    const updateCache = join(root, '.config', 'greatping', 'update-check.json');
+    json(updateCache, { latest: '99.0.0', attemptedAt: Date.now(), checkedAt: Date.now() });
     json(join(root, '.claude.json'), {
       preferences: { theme: 'dark' },
       mcpServers: {
@@ -140,6 +143,7 @@ test('uninstall preserves foreign hooks, MCP and files, revokes pairing and is r
     const result = exec(['uninstall', '--yes', '--json']);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).complete, true);
+    assert.equal(existsSync(updateCache), false);
     assert.deepEqual(JSON.parse(readFileSync(HOSTS.claude.settingsPath(), 'utf8')), {
       model: 'opus',
       hooks: { Stop: [foreign] },
@@ -257,7 +261,7 @@ test('global npm removal runs last and verifies the running package root', async
     const modules = join(root, 'global', 'node_modules');
     const packageRoot = join(modules, 'greatping');
     mkdirSync(join(packageRoot, 'dist'), { recursive: true });
-    writeFileSync(join(packageRoot, 'dist', 'index.js'), readFileSync(cli));
+    cpSync(new URL('../dist', import.meta.url), join(packageRoot, 'dist'), { recursive: true });
     json(
       join(packageRoot, 'package.json'),
       JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')),

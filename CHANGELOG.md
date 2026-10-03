@@ -3,6 +3,16 @@
 Source synchronization and npm publication are separate. Entries under
 Unreleased are not available merely by installing npm `latest`.
 
+## 0.2.2 — 2026-10-03
+
+- Clear the waiting indicator before printing an answer or final status; keep
+  narrow terminals, resized windows and interrupted questions readable.
+- Check npm for newer stable CLI versions in the background and show a short
+  update notice after interactive commands. Cache checks, fail silently offline,
+  and support `--no-update-check` and `NO_UPDATE_NOTIFIER=1`.
+- Keep JSON output free of spinners and skip update checks for automation,
+  redirected output, version commands and uninstall.
+
 ## 0.2.1 — 2026-10-03
 
 - Let questions with choices also accept the user's own words, through the

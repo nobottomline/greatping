@@ -34,6 +34,27 @@ Every command has `--help`. `login` names the computer as the OS does (for examp
 - The terminal QR code is drawn with background colors, dark on white, so it scans on light and dark themes; without color it falls back to half blocks.
 - Exit codes: `0` success, `1` error (including "not paired" for `status`), `2` the question or pairing code ended without an answer (expired, cancelled or resolved), `130`/`143` interrupted. On those signals `ask` withdraws the question from the phone.
 - `ask` waits on a WebSocket and checks the HTTP state after disconnects, so an answer that arrives before the connection is still observed.
+- `ask` clears its waiting line before printing the answer or final status. JSON has no spinner; narrow terminals shorten the waiting label instead of wrapping it.
+
+## Update notices
+
+Interactive commands check npm's `latest` tag in a detached process, at most once
+per day. A newer stable version produces a short notice on stderr **after** the
+command's result, with `npm install --global greatping@latest`. It is a suggestion;
+GreatPing never installs an update automatically. After a quick first command,
+the notice may appear on the next command once the background check finishes.
+
+The check has a three-second HTTP timeout and a five-second total lifetime. A
+failed attempt is silent and waits at least an hour before retrying. The cache
+(`update-check.json` beside the CLI config) is written atomically with user-only
+permissions; results older than seven days are not advertised. Only the public
+package tag is requested from `registry.npmjs.org`, without pairing credentials,
+npm credentials or project information. HTTP redirects are refused.
+
+Checks and notices are disabled for redirected output, JSON, CI, dumb terminals,
+version commands, hooks, MCP and uninstall. Use `--no-update-check` or
+`NO_UPDATE_NOTIFIER=1` to disable them for other commands. Color settings apply to
+the notice too. `uninstall` removes the update cache with the other local state.
 
 After `login`, `status`, `setup` and `doctor`, and at most hourly from hooks, the CLI reports its OS name and version, CPU architecture, CLI version and, per agent (Claude Code, Codex), whether its hooks work, whether they also alert on finished turns, whether the MCP tools and skill are installed, and when a hook last ran. Devices show this under Agents. It never sends user names, paths, addresses or hardware identifiers. A computer cannot rename itself or change which devices it alerts; that is done in the app. It can pause its own alerts.
 
