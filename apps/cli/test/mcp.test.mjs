@@ -196,9 +196,25 @@ test('MCP questions distinguish answers and expiry and accept comma-bearing choi
       assert.equal(result.structuredContent.status, mode);
       assert.equal(result.structuredContent.requestId, 'test-request');
       assert.deepEqual(calls()[0].body.content.choices, ['Yes, continue', 'No']);
+      // Choices are suggestions for an agent: own words are allowed unless it says otherwise.
+      assert.equal(calls()[0].body.content.allowText, true);
       assert.equal(calls()[0].body.host, 'codex');
       assert.equal(Boolean(result.isError), mode === 'expired');
     });
+});
+test('MCP strict questions and free-text questions send no own-words flag', async () => {
+  await session('answered', async ({ request, calls }) => {
+    await call(request, 'ask_user', {
+      question: 'Deploy?',
+      choices: ['Yes', 'No'],
+      allowText: false,
+      timeoutSeconds: 10,
+    });
+    await call(request, 'ask_user', { question: 'Which region?', timeoutSeconds: 10 });
+    const created = calls().filter((c) => c.path === '/v1/requests');
+    assert.equal(created.length, 2);
+    for (const { body } of created) assert.equal(body.content.allowText, undefined);
+  });
 });
 test('MCP cancellation during creation withdraws the question once its ID arrives', async () => {
   await session('cancel', async ({ request, notify, calls }) => {

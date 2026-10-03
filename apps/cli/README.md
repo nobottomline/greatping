@@ -13,7 +13,7 @@ greatping doctor [--fix]     # check (and repair) pairing, hooks and tools
 greatping pause 2h           # silence this computer on every device; resume with `greatping resume`
 greatping project labels folder  # alerts name the project folder, e.g. "Codex · billing-api"
 greatping project name "Client A" # call the current project something else (or: hide, reset, list)
-greatping ask "Continue?" --choices Yes,No --timeout 5m
+greatping ask "Continue?" --choices Yes,No --timeout 5m  # add --allow-text to accept own words too
 greatping notify "Build complete" --title CI
 greatping run -- pnpm test   # run a command, get "pnpm test failed · exit 1 after 4m 12s" (--on-fail, --title)
 greatping test               # test notification to every device, with Apple's or Google's answer per device
@@ -89,7 +89,7 @@ network access. CLI and MCP share the same operations and validation.
 | Tool | Inputs | Result |
 |---|---|---|
 | `notify` | Optional `message`, `title` | `requestId`, `status: accepted` or `paused` |
-| `ask_user` | `question`, optional `choices`, `timeoutSeconds` (10–86400; default 1800) | `requestId`, `status`, `paused`, optional `answer` |
+| `ask_user` | `question`, optional `choices`, `allowText` (default true), `timeoutSeconds` (10–86400; default 1800) | `requestId`, `status`, `paused`, optional `answer` |
 | `get_status` | None | `paired`, `connection`, `alertsPausedUntil`, `deviceCount`, `integrations` |
 | `pause_alerts` | `durationSeconds` (60–604800; default 3600) | `alertsPausedUntil` |
 | `resume_alerts` | None | `alertsPausedUntil: null` |
@@ -119,6 +119,14 @@ Pairing, installation, repair and removal stay in the CLI.
 keeps `requestId` and `answer` and adds `status` and `paused`; terminal states
 without an answer also have a JSON result. Commas work inside MCP choice strings;
 the CLI's `--choices` remains a comma-separated list.
+
+A question with choices accepts only one of them unless the user's own words
+are allowed. MCP `ask_user` allows them by default, since agents offer choices
+as suggestions; pass `allowText: false` when the answer must be a choice.
+`greatping ask` is strict for scripts; `--allow-text` opts in. A question
+without choices always takes the user's words. On the phone, a yes/no question
+gets Yes and No buttons in the notification, plus Reply when own words are
+allowed; other choices open the app.
 
 ## Removal
 

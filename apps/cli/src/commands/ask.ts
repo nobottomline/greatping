@@ -7,7 +7,7 @@ import { UsageError } from './usage';
 
 export async function ask(
   question: string | undefined,
-  options: { choices?: string; timeout?: string; json?: boolean },
+  options: { choices?: string; allowText?: boolean; timeout?: string; json?: boolean },
 ): Promise<number> {
   if (!question?.trim()) throw new UsageError('ask', 'Write the question to send.');
   const timeout = parseDuration(options.timeout ?? '30m');
@@ -17,6 +17,8 @@ export async function ask(
     .split(',')
     .map((choice) => choice.trim())
     .filter(Boolean);
+  if (options.allowText && choices.length === 0)
+    throw new UsageError('ask', 'Use --allow-text together with --choices.');
   const controller = new AbortController();
   let exitCode = 0;
   const interrupt = () => {
@@ -35,6 +37,7 @@ export async function ask(
   try {
     const result = await askQuestion(question, choices, timeout, {
       signal: controller.signal,
+      allowText: options.allowText === true,
       onCreated(request) {
         warnIfPaused(request);
         progress = spinner('Waiting for your answer in GreatPing');

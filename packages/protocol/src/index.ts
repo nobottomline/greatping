@@ -815,11 +815,17 @@ export function describeRequest(
   return { title: req.title ?? source, body: req.body };
 }
 
+/**
+ * The notification's buttons: Yes and No for "Yes"/"No" in any spelling, and a
+ * Reply field when the question accepts the user's own words. Other choices
+ * cannot be buttons (iOS registers button titles in advance), so a tap opens
+ * them in the app.
+ */
 export function pickNotificationCategory(req: PingRequest): string {
   if (req.kind !== 'ask') return 'NOTIFY';
-  // "Yes"/"No" in any spelling gets the notification's own Yes and No buttons.
+  if (req.choices.length === 0) return 'ASK_TEXT';
   const lower = req.choices.map((choice) => choice.trim().toLowerCase());
-  if (lower.length === 2 && lower.includes('yes') && lower.includes('no')) return 'ASK_YES_NO';
-  if (req.choices.length > 0) return 'ASK_CHOICES';
-  return 'ASK_TEXT';
+  const yesNo = lower.length === 2 && lower.includes('yes') && lower.includes('no');
+  if (yesNo) return req.allowText ? 'ASK_YES_NO_TEXT' : 'ASK_YES_NO';
+  return req.allowText ? 'ASK_CHOICES_TEXT' : 'ASK_CHOICES';
 }

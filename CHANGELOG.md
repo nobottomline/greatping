@@ -3,6 +3,16 @@
 Source synchronization and npm publication are separate. Entries under
 Unreleased are not available merely by installing npm `latest`.
 
+## 0.2.1 — 2026-10-03
+
+- Let questions with choices also accept the user's own words, through the
+  `--allow-text` flag of `greatping ask` and the `allowText` field of MCP
+  `ask_user` (default true; pass false when the answer must be one of the
+  choices). The phone then offers a Reply field next to Yes and No, or alone
+  next to other choices.
+- Send the CLI version with every service call, so an unsupported client gets a
+  clear update message.
+
 ## 0.2.0 — 2026-10-03
 
 - Require Node.js 22.20 or later for new CLI builds (breaking runtime change).

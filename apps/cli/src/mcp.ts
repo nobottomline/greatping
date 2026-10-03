@@ -100,6 +100,12 @@ export function createMcpServer(): McpServer {
           .array(z.string().trim().min(1).max(LIMITS.choiceMaxLength))
           .max(LIMITS.choicesMax)
           .optional(),
+        allowText: z
+          .boolean()
+          .default(true)
+          .describe(
+            'With choices, whether the user may also answer in their own words. Set false only when the answer must be one of the choices.',
+          ),
         timeoutSeconds: z.number().int().min(10).max(86400).default(LIMITS.timeoutDefaultSec),
       }),
       outputSchema: z.union([
@@ -115,9 +121,10 @@ export function createMcpServer(): McpServer {
       ]),
       annotations: mutating,
     },
-    async ({ question, choices, timeoutSeconds }, ctx) => {
+    async ({ question, choices, allowText, timeoutSeconds }, ctx) => {
       try {
         const value = await askQuestion(question, choices ?? [], timeoutSeconds, {
+          allowText,
           signal: ctx.mcpReq.signal,
           origin: origin(),
         });

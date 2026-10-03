@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { api } from '../src/api.ts';
+import { ask } from '../src/commands/ask.ts';
 import {
   configPath,
   DEFAULT_API_URL,
@@ -14,7 +15,7 @@ import {
 } from '../src/config.ts';
 import { ago, parseDuration } from '../src/duration.ts';
 import { renderQr } from '../src/qr.ts';
-import { MIN_NODE_VERSION, supportsNodeVersion } from '../src/version.ts';
+import { MIN_NODE_VERSION, supportsNodeVersion, VERSION } from '../src/version.ts';
 
 test('the runtime contract rejects old Node and accepts supported LTS versions', () => {
   assert.equal(MIN_NODE_VERSION, '22.20.0');
@@ -171,9 +172,17 @@ test('API requests use the service credential and refuse redirects', async () =>
     assert.equal(calls[0].url, `${DEFAULT_API_URL}/v1/machine/me`);
     assert.equal(calls[0].options.headers.authorization, 'Bearer test-token');
     assert.equal(calls[0].options.redirect, 'error');
+    assert.equal(calls[0].options.headers['x-greatping-client'], `cli/${VERSION}`);
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('ask accepts own words only next to choices', async () => {
+  await assert.rejects(
+    ask('Which region?', { allowText: true }),
+    /--allow-text together with --choices/,
+  );
 });
 
 test('a real redirect response cannot forward a credential or trigger a second request', async () => {

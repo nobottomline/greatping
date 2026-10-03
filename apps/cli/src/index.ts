@@ -62,7 +62,7 @@ const commands: Record<string, Command> = {
     run: (v) => status({ json: Boolean(v.json) }),
   },
   ask: {
-    usage: 'greatping ask <question> [--choices a,b] [--timeout 30m] [--json]',
+    usage: 'greatping ask <question> [--choices a,b [--allow-text]] [--timeout 30m] [--json]',
     summary: 'Ask a question and wait for the answer from your devices',
     details: [
       'Prints the answer to stdout, so it works in scripts:',
@@ -70,17 +70,20 @@ const commands: Record<string, Command> = {
     ],
     options: {
       choices: { type: 'string', short: 'c' },
+      'allow-text': { type: 'boolean' },
       timeout: { type: 'string', short: 't' },
       json: { type: 'boolean' },
     },
     flags: [
       ['-c, --choices <a,b>', 'Offer choices instead of a free-text answer'],
+      ['--allow-text', 'With --choices, also accept an answer in the user’s own words'],
       ['-t, --timeout <time>', 'Give up after 30s, 5m, 1h … (default: 30m)'],
       ['--json', 'Print {"requestId","answer"} as JSON'],
     ],
     run: (v, p) =>
       ask(p.join(' ') || undefined, {
         choices: v.choices as string,
+        allowText: Boolean(v['allow-text']),
         timeout: v.timeout as string,
         json: Boolean(v.json),
       }),

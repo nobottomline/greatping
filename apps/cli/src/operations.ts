@@ -165,6 +165,8 @@ export async function askQuestion(
     signal?: AbortSignal;
     onCreated?: (request: PingRequest) => void;
     origin?: Origin;
+    /** With choices, also accept the user's own words (a question without choices always does). */
+    allowText?: boolean;
   } = {},
 ): Promise<QuestionResult> {
   if (!question.trim() || question.length > LIMITS.bodyMaxLength)
@@ -189,6 +191,7 @@ export async function askQuestion(
       enc: 0,
       body: question.trim(),
       choices: choices.map((choice) => choice.trim()),
+      ...(choices.length > 0 && options.allowText ? { allowText: true } : {}),
       ...(projectLabel ? { projectLabel } : {}),
     },
     timeoutSec: timeoutSeconds,
