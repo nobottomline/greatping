@@ -21,7 +21,7 @@
     "test:quality": "node --test scripts/quality/*.test.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.14",
+    "@biomejs/biome": "^2.5.15",
     "oxlint": "1.86.0",
     "oxlint-tsgolint": "7.0.2003",
     "typescript": "~5.9.3",
