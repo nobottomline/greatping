@@ -190,10 +190,12 @@ try:
         config = onboarding_home / '.config/greatping/config.json'
         try:
             tests = Path(__file__).resolve().parent
+            pairing_fixture = os.environ.get('GREATPING_TEST_PAIRING_FIXTURE',
+                                             str(tests / 'fixtures/pairing-fetch.mjs'))
             onboarding_env['NODE_OPTIONS'] = (
                 f'--experimental-transform-types --no-warnings '
                 f'--import={tests / "ts-resolve.mjs"} '
-                f'--import={tests / "fixtures/pairing-fetch.mjs"}')
+                f'--import={pairing_fixture}')
             t = Terminal(['login', '--name', 'PTY Mac'], onboarding_env)
             t.wait('Enter Toggle'); t.send('\x03'); t.finish(130)
             assert json.loads(config.read_text())['machineId'] == 'pty-machine'

@@ -47,6 +47,8 @@ jobs:
           echo "version=$(node -p "require('./apps/cli/package.json').version")" >> "$GITHUB_OUTPUT"
           echo "source=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           mkdir -p "$RUNNER_TEMP/candidate"
+      - name: Bundle the simulated phone for clean archive runners
+        run: pnpm -F greatping exec tsdown --config test/tsdown.fixture.config.ts --out-dir "$RUNNER_TEMP/candidate/fixtures"
       - if: ${{ !inputs.reuse-release }}
         shell: bash
         env:
@@ -102,6 +104,8 @@ jobs:
           node scripts/release.mjs verify "$RUNNER_TEMP/candidate" "$version" "$(git rev-parse HEAD)"
       - if: runner.os != 'Windows'
         shell: bash
+        env:
+          GREATPING_TEST_PAIRING_FIXTURE: ${{ runner.temp }}/candidate/fixtures/pairing-fetch.mjs
         run: node apps/cli/test/package-smoke.mjs "$RUNNER_TEMP/candidate/greatping.tgz"
       # Unix PTY and mock-host suites do not qualify native Windows hooks.
       # Windows checks installation, the npm launcher and offline commands.
