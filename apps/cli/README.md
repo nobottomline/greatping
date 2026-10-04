@@ -9,7 +9,7 @@ npm install -g greatping
 greatping login              # pair this computer (QR code or typed code)
 greatping setup              # alerts, skill and tools for Claude Code and Codex
 greatping status             # pairing, devices, pause, agents (--json available)
-greatping doctor [--fix]     # check (and repair) pairing, hooks and tools
+greatping doctor [--fix] [--verbose] # check pairing, hooks and tools; include diagnostics
 greatping pause 2h           # silence this computer on every device; resume with `greatping resume`
 greatping project labels folder  # alerts name the project folder, e.g. "Codex · billing-api"
 greatping project name "Client A" # call the current project something else (or: hide, reset, list)
@@ -27,6 +27,8 @@ From a checkout, use Node.js 24 LTS (24.11 or later), build with `pnpm -F greatp
 
 Every command has `--help`. `login` names the computer as the OS does (for example "Alex's MacBook Pro"; override with `--name`), prints a QR code and a manual code, and waits with a countdown. When Claude Code or Codex is installed but not alerting yet, an interactive `login` offers `setup`; non-interactive runs only print the hint and never change another tool's settings. The CLI saves its bearer credential under `~/.config/greatping/config.json` on macOS/Linux or `%APPDATA%\greatping\config.json` on Windows with user-only permissions.
 
+The code has two halves, `ABCD-EFGH`. The first finds the pairing on the service; the second never leaves this computer and the phone it is typed or scanned into. The CLI and the phone run CPace (a password-authenticated key exchange) on it, so each confirms the other's keys and a service in between cannot swap them; a mistyped code makes `login` revoke itself with "The code did not match". The computer's Ed25519 and X25519 keys and the latest account manifest it verified (the signed list of the account's devices and computers) are kept in the same user-only config file. `status` shows them as Keys; a computer paired before keys shows `none` until it is paired again. Hourly reports follow the manifest, verify every new version and report the version in use, so devices notice a service that withholds changes. The protocol is in `packages/protocol/src/crypto`; `@noble/curves` and `@noble/hashes` are runtime dependencies because the bundled protocol imports them.
+
 ## Output contract
 
 - stdout carries only results: the `ask` answer, `--json` objects, `--version`. Messages, spinners and prompts go to stderr, so `answer=$(greatping ask …)` works.
@@ -35,6 +37,8 @@ Every command has `--help`. `login` names the computer as the OS does (for examp
 - Exit codes: `0` success, `1` error (including "not paired" for `status`), `2` the question or pairing code ended without an answer (expired, cancelled or resolved), `130`/`143` interrupted. On those signals `ask` withdraws the question from the phone.
 - `ask` waits on a WebSocket and checks the HTTP state after disconnects, so an answer that arrives before the connection is still observed.
 - `ask` clears its waiting line before printing the answer or final status. JSON has no spinner; narrow terminals shorten the waiting label instead of wrapping it.
+- `notify` immediately shows a sending indicator in interactive terminals and clears it before acceptance, a paused-alert warning or an error. JSON, redirected output, CI and dumb terminals have no animation. Interruption restores the terminal and returns `130`/`143`; check the app because an interrupted send may already have been accepted. Acceptance does not confirm delivery to a device.
+- Normal command output identifies the GreatPing service without printing its address. `doctor --verbose` includes the address for troubleshooting; `status --json` retains its existing `server` field for script compatibility.
 
 ## Update notices
 

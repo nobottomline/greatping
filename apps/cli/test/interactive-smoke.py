@@ -6,8 +6,6 @@ hosted API. Run after building: python3 test/interactive-smoke.py (macOS/Linux).
 from pathlib import Path
 import fcntl
 import hashlib
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-import threading
 import json
 import os
 import pty
@@ -188,44 +186,18 @@ try:
         print('PASS Public commands reject server overrides and help omits server configuration')
 
         # Pairing is already saved when setup is interrupted. Propagate its code.
-        class Relay(BaseHTTPRequestHandler):
-            def reply(self, data):
-                body = json.dumps(data).encode()
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.send_header('Content-Length', str(len(body)))
-                self.end_headers(); self.wfile.write(body)
-            def do_POST(self):
-                self.reply({'pairingId': 'pty-pair', 'pollSecret': 'test-secret',
-                            'userCode': 'TEST-PAIR', 'qrPayload': 'greatping://pair?code=TEST-PAIR',
-                            'expiresAt': int(time.time() * 1000) + 10000, 'pollIntervalSec': 0})
-            def do_GET(self):
-                self.reply({'status': 'approved', 'machineId': 'pty-machine',
-                            'machineToken': 'test-token', 'accountId': 'pty-account', 'deviceCount': 1})
-            def do_PATCH(self): self.reply({})
-            def log_message(self, *_): pass
-        relay = ThreadingHTTPServer(('127.0.0.1', 0), Relay)
-        worker = threading.Thread(target=relay.serve_forever, daemon=True); worker.start()
         onboarding_home, onboarding_env = fixture(home.parent / 'onboarding')
         config = onboarding_home / '.config/greatping/config.json'
         try:
-            # Redirect only test fetches; the shipped CLI has no server override.
-            preload = onboarding_home.parent / 'relay.mjs'
-            preload.write_text(f"""const original = globalThis.fetch;
-const relay = 'http://127.0.0.1:{relay.server_port}';
-globalThis.fetch = (url, options) => {{
-  const parsed = new URL(url);
-  if (parsed.origin !== 'https://greatping-api-dev.ueldo343.workers.dev')
-    throw new Error('Unexpected hosted request');
-  return original(relay + parsed.pathname + parsed.search, options);
-}};
-""")
-            onboarding_env['NODE_OPTIONS'] = f'--import={preload}'
+            tests = Path(__file__).resolve().parent
+            onboarding_env['NODE_OPTIONS'] = (
+                f'--experimental-transform-types --no-warnings '
+                f'--import={tests / "ts-resolve.mjs"} '
+                f'--import={tests / "fixtures/pairing-fetch.mjs"}')
             t = Terminal(['login', '--name', 'PTY Mac'], onboarding_env)
             t.wait('Enter Toggle'); t.send('\x03'); t.finish(130)
             assert json.loads(config.read_text())['machineId'] == 'pty-machine'
         finally:
-            relay.shutdown(); relay.server_close(); worker.join(timeout=2)
             config.unlink(missing_ok=True)
         print('PASS Pairing enters the picker directly; Ctrl+C propagates 130 and retains pairing')
 

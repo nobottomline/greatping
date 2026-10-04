@@ -6,7 +6,8 @@
       "entry": ["scripts/**/*.mjs"]
     },
     "apps/cli": {
-      "ignoreBinaries": ["scutil", "hostnamectl"]
+      "ignoreBinaries": ["scutil", "hostnamectl"],
+      "ignoreDependencies": ["@noble/curves", "@noble/hashes"]
     }
   }
 }

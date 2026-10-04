@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { MemberKeys } from './crypto/keys';
 
 export const PROTOCOL_VERSION = '0.1.0';
 
@@ -15,6 +16,8 @@ export const LIMITS = {
   answerTextMaxLength: 2000,
   /** A device younger than this may only remove devices and computers added after it. */
   removalCoolingOffSec: 72 * 3600,
+  /** Members of one account's manifest; far above any personal setup. */
+  manifestMembersMax: 100,
   escalationWaitDefaultSec: 90,
   escalationWaitMaxSec: 3600,
   reminderDefaultSec: 5 * 60,
@@ -131,6 +134,8 @@ export interface Device {
   lastPlace: Place | null;
   /** When this device may remove devices and computers that joined before it. */
   seniorAt: number;
+  /** This device's ceremony confirmation tag after it was linked; null before or without keys. */
+  ceremonyTag: string | null;
 }
 
 /**
@@ -182,6 +187,10 @@ export interface Machine {
   projectLabels: ProjectLabels;
   lastAlertAt: number | null;
   alertsLast7Days: number;
+  /** The computer's ceremony confirmation tag after pairing; null before or without keys. */
+  ceremonyTag: string | null;
+  /** The manifest version the computer last reported using; null if it has not. */
+  manifestVersion: number | null;
 }
 
 /**
@@ -399,6 +408,8 @@ export interface MeResponse {
   devices: Device[];
   machines: Machine[];
   routes: Route[];
+  /** The account's latest manifest version; null for an account created before keys. */
+  manifestVersion: number | null;
 }
 
 export interface ListEventsResponse {
@@ -468,7 +479,11 @@ const machineDescriptionSchema = {
 };
 
 /** A computer reports its own description; it cannot change routing or its name. */
-export const reportMachineBodySchema = z.object(machineDescriptionSchema);
+export const reportMachineBodySchema = z.object({
+  ...machineDescriptionSchema,
+  /** The manifest version the computer verified and uses. */
+  manifestVersion: z.number().int().positive().optional(),
+});
 export type ReportMachineBody = z.infer<typeof reportMachineBodySchema>;
 
 /**
@@ -497,19 +512,98 @@ export interface ProjectLabelsResponse {
   projectLabels: ProjectLabels;
 }
 
+// ---------------------------------------------------------------------------
+// Keys, the account manifest and the pairing ceremony (docs/device-keys.md).
+// These schemas bound shape and size at the API; `verifyNext` and the ceremony
+// functions in `@greatping/protocol/crypto` decide what is valid.
+// ---------------------------------------------------------------------------
+
+const base64url = (bytes: number) =>
+  z.string().regex(new RegExp(`^[A-Za-z0-9_-]{${Math.ceil((bytes * 4) / 3)}}$`));
+const memberIdSchema = z.string().regex(/^[\w-]{1,64}$/);
+const publicKeySchema = z.strictObject({
+  alg: z.string().max(20),
+  key: z.string().max(200),
+});
+export const memberKeysSchema = z.strictObject({ sign: publicKeySchema, enc: publicKeySchema });
+
+export const manifestSchema = z.strictObject({
+  account: memberIdSchema,
+  version: z.number().int().positive(),
+  previous: z.string().max(100),
+  change: z.strictObject({
+    op: z.enum(['genesis', 'add', 'remove', 'rotate']),
+    target: memberIdSchema,
+  }),
+  members: z
+    .array(
+      z.strictObject({
+        kind: z.enum(['device', 'computer']),
+        id: memberIdSchema,
+        sign: publicKeySchema,
+        enc: publicKeySchema,
+        addedAt: z.number().int().nonnegative(),
+        addedBy: memberIdSchema.nullable(),
+      }),
+    )
+    .min(1)
+    .max(LIMITS.manifestMembersMax),
+  signer: memberIdSchema,
+  createdAt: z.number().int().nonnegative(),
+  signature: z.string().max(200),
+});
+export type ManifestPayload = z.infer<typeof manifestSchema>;
+
+/** A CPace public share (32 bytes) and a confirmation tag (64 bytes), base64url. */
+const shareSchema = base64url(32);
+const tagSchema = base64url(64);
+/** The CPace session id (16 random bytes) the initiator draws, as the share depends on it. */
+const sessionSchema = base64url(16);
+
+/** The approving device's answer, relayed to the initiator. */
+export interface CeremonyResponse {
+  share: string;
+  device: string;
+  manifestHash: string;
+  tag: string;
+}
+
+/** The initiator's confirmation tag, posted once it has verified the answer. */
+export const ceremonyConfirmBodySchema = z.strictObject({ tag: tagSchema });
+export type CeremonyConfirmBody = z.infer<typeof ceremonyConfirmBodySchema>;
+
+/** A new manifest version that changes no membership by itself (genesis, rotation, cleanup). */
+export const postManifestBodySchema = z.strictObject({ manifest: manifestSchema });
+export type PostManifestBody = z.infer<typeof postManifestBodySchema>;
+
+export interface ManifestsResponse {
+  /** Versions after the requested one, oldest first. */
+  manifests: ManifestPayload[];
+}
+
+/** Removing a member of a keyed account comes with the version that removes it. */
+export const removeMemberBodySchema = z.strictObject({ manifest: manifestSchema });
+export type RemoveMemberBody = z.infer<typeof removeMemberBodySchema>;
+
 export const pairStartBodySchema = z.object({
   machineName: z.string().trim().min(1).max(100),
   platform: z.enum(['darwin', 'linux', 'win32', 'other']),
   ...machineDescriptionSchema,
+  /** The computer's public keys and its CPace share; the secret half never leaves it. */
+  keys: memberKeysSchema,
+  session: sessionSchema,
+  share: shareSchema,
 });
 export type PairStartBody = z.infer<typeof pairStartBodySchema>;
 
 export interface PairStartResponse {
   pairingId: string;
   pollSecret: string;
-  userCode: string;
+  /** The first half of the code; the computer adds its secret half. */
+  lookup: string;
+  /** The id the computer will have, named by the approving device's manifest version. */
+  machineId: string;
   expiresAt: number;
-  qrPayload: string;
   pollIntervalSec: number;
 }
 
@@ -522,10 +616,17 @@ export type PairPollResponse =
       machineToken: string;
       accountId: string;
       deviceCount: number;
+      ceremony: CeremonyResponse;
+      /** The account's manifest chain from genesis. */
+      manifests: ManifestPayload[];
     };
 
-export const pairApproveBodySchema = z.object({
-  userCode: z.string(),
+export const pairApproveBodySchema = z.strictObject({
+  lookup: z.string(),
+  share: shareSchema,
+  tag: tagSchema,
+  /** The next version, adding this computer with the keys of the preview. */
+  manifest: manifestSchema,
 });
 export type PairApproveBody = z.infer<typeof pairApproveBodySchema>;
 
@@ -545,26 +646,44 @@ export interface PairPreviewResponse {
   place: Place | null;
   createdAt: number;
   expiresAt: number;
+  machineId: string;
+  keys: MemberKeys;
+  /** CPace session id and share, as the computer sent them. */
+  session: string;
+  share: string;
 }
 
 // Device linking: a new phone shows a code, a trusted phone scans and approves it.
 
-export const linkStartBodySchema = z.object(deviceDescriptionSchema);
+export const linkStartBodySchema = z.object({
+  ...deviceDescriptionSchema,
+  keys: memberKeysSchema,
+  session: sessionSchema,
+  share: shareSchema,
+});
 export type LinkStartBody = z.infer<typeof linkStartBodySchema>;
 
 export interface LinkStartResponse {
   linkId: string;
   pollSecret: string;
-  userCode: string;
+  lookup: string;
+  /** The id this device will have once approved. */
+  deviceId: string;
   expiresAt: number;
-  qrPayload: string;
   pollIntervalSec: number;
 }
 
 export type LinkPollResponse =
   | { status: 'pending' }
   | { status: 'expired' }
-  | { status: 'approved'; accountId: string; deviceId: string; deviceToken: string };
+  | {
+      status: 'approved';
+      accountId: string;
+      deviceId: string;
+      deviceToken: string;
+      ceremony: CeremonyResponse;
+      manifests: ManifestPayload[];
+    };
 
 export interface LinkPreviewResponse {
   deviceName: string;
@@ -576,10 +695,19 @@ export interface LinkPreviewResponse {
   place: Place | null;
   createdAt: number;
   expiresAt: number;
+  deviceId: string;
+  keys: MemberKeys;
+  /** CPace session id and share, as the new device sent them. */
+  session: string;
+  share: string;
 }
 
-export const linkApproveBodySchema = z.object({
-  userCode: z.string(),
+export const linkApproveBodySchema = z.strictObject({
+  lookup: z.string(),
+  share: shareSchema,
+  tag: tagSchema,
+  /** The next version, adding this device with the keys of the preview. */
+  manifest: manifestSchema,
 });
 export type LinkApproveBody = z.infer<typeof linkApproveBodySchema>;
 

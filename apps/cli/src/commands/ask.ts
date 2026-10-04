@@ -83,7 +83,33 @@ export async function notify(
   options: { title?: string; json?: boolean },
 ): Promise<number> {
   if (!message?.trim()) throw new UsageError('notify', 'Write the message to send.');
-  const result = await sendNotice(message, options.title);
+  const controller = new AbortController();
+  let exitCode = 0;
+  const interrupt = () => {
+    exitCode = 130;
+    controller.abort();
+  };
+  const terminate = () => {
+    exitCode = 143;
+    controller.abort();
+  };
+  process.once('SIGINT', interrupt);
+  process.once('SIGTERM', terminate);
+  const progress = options.json ? undefined : spinner('Sending notice to GreatPing');
+  let result: Awaited<ReturnType<typeof sendNotice>>;
+  try {
+    result = await sendNotice(message, options.title, controller.signal);
+  } catch (error) {
+    if (!exitCode) throw error;
+    progress?.stop();
+    // Aborting a POST cannot prove whether the service accepted it.
+    ui.warn('Sending interrupted. GreatPing may have accepted the notice; check the app.');
+    return exitCode;
+  } finally {
+    progress?.stop();
+    process.off('SIGINT', interrupt);
+    process.off('SIGTERM', terminate);
+  }
   if (options.json) process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'paused') warnIfPaused({ paused: true });
   else ui.success('GreatPing accepted the notice.');

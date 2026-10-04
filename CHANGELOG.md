@@ -3,6 +3,23 @@
 Source synchronization and npm publication are separate. Entries under
 Unreleased are not available merely by installing npm `latest`.
 
+## 0.3.0 — 2026-10-04
+
+- Pair computers through CPace with explicit key confirmation. Verify and pin
+  the account's signed membership manifest before retaining a pairing.
+- Store computer signing and encryption keys alongside the pairing credential;
+  verify subsequent manifest versions and report the version in use.
+- Show sending progress for `notify` and clear it before acceptance, pause,
+  errors or interruption. Preserve clean JSON and non-interactive output.
+- Keep the service address out of normal command output and connection errors;
+  expose it through `doctor --verbose` and retain `status --json` compatibility.
+
+This preview requires the matching device-key Worker and mobile update. CLI
+0.2.x and apps without keys cannot create new pairings after the service update.
+Existing paired computers can keep sending alerts; development accounts without
+keys must start over in the updated app and pair their computers again. Content
+encryption and signed answers are later phases and are not part of this release.
+
 ## 0.2.2 — 2026-10-03
 
 - Clear the waiting indicator before printing an answer or final status; keep

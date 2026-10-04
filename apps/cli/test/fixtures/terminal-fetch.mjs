@@ -12,12 +12,29 @@ globalThis.fetch = async (url, options = {}) => {
   }
   if (parsed.origin !== 'https://greatping-api-dev.ueldo343.workers.dev')
     throw new Error('Unexpected hosted request');
-  if (parsed.pathname === '/v1/requests' && options.method === 'POST')
+  if (parsed.pathname === '/v1/machine/me') {
+    if (process.env.GREATPING_TEST_MODE === 'network') throw new Error('Fixture network failure');
+    if (options.method === 'PATCH') return Response.json({});
+    return Response.json({
+      machine: { name: 'Terminal Mac', alertsPausedUntil: null, presenceDelaySec: 0 },
+      devices: [{ name: 'Test phone', type: 'ios', mode: 'first' }],
+    });
+  }
+  if (parsed.pathname === '/v1/requests' && options.method === 'POST') {
+    if (JSON.parse(options.body).kind === 'notify') {
+      const mode = process.env.GREATPING_TEST_MODE;
+      await delay(mode === 'hang' ? 10000 : 700, undefined, { signal: options.signal });
+      if (mode === 'network') throw new Error('Fixture network failure');
+      if (mode === 'error')
+        return Response.json({ error: { code: 'unauthorized' } }, { status: 401 });
+      return Response.json({ id: 'terminal-notice', paused: mode === 'paused' });
+    }
     return Response.json({
       id: 'terminal-request',
       status: 'pending',
       expiresAt: Date.now() + 60000,
     });
+  }
   if (parsed.pathname === '/v1/requests/terminal-request/cancel')
     return new Response(null, { status: 204 });
   if (parsed.pathname === '/v1/requests/terminal-request') {

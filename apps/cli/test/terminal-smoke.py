@@ -144,6 +144,66 @@ try:
         assert t.output == '', t.output
         print('PASS Resize cleanup, piped answers and JSON preserve the output contract')
 
+        for cols in [100, 32, 8]:
+            t = Terminal(['notify', 'Build complete'], env, cols=cols)
+            t.wait('Sending' if cols > 8 else '⠋')
+            assert t.process.poll() is None, 'Notice completed before progress was visible'
+            t.finish()
+            final = screen(t.output, cols)
+            assert 'Sending' not in final, final
+            assert 'GreatPingacceptedthenotice.' in re.sub(r'\s', '', final), final
+            assert t.output.rfind('\x1b[2K') < t.output.index('GreatPing accepted'), t.output
+            assert '\x1b[?25h' in t.output, 'Cursor not restored'
+        for mode, code, text in [('paused', 0, 'paused'), ('error', 1, 'pair again'),
+                                 ('network', 1, 'Check your internet connection')]:
+            t = Terminal(['notify', 'Build complete'], {**env, 'GREATPING_TEST_MODE': mode})
+            t.wait('Sending'); t.finish(code)
+            final = screen(t.output, t.cols)
+            assert 'Sending' not in final and text in final, final
+            assert 'GreatPing accepted' not in final, final
+            assert '\x1b[?25h' in t.output
+        print('PASS Notify shows immediate progress and replaces it on acceptance, pause and errors')
+
+        for sig, code in [(signal.SIGINT, 130), (signal.SIGTERM, 143)]:
+            t = Terminal(['notify', 'Build complete'], {**env, 'GREATPING_TEST_MODE': 'hang'})
+            t.wait('Sending'); os.killpg(t.process.pid, sig); t.finish(code)
+            final = screen(t.output, t.cols)
+            assert 'Sending notice' not in final and 'may have accepted' in final, final
+            assert '\x1b[?25h' in t.output
+        t = Terminal(['notify', 'Build complete'], env)
+        t.wait('Sending'); t.resize(32); t.finish()
+        assert t.output.rfind('\x1b[2K') < t.output.index('GreatPing accepted')
+        for extra in [{}, {'CI': '1'}, {'TERM': 'dumb'}]:
+            t = Terminal(['notify', 'Build complete', '--json'], {**env, **extra}, split=True)
+            assert json.loads(t.finish()) == {'requestId': 'terminal-notice', 'status': 'accepted'}
+            assert 'Sending' not in t.output and '\x1b' not in t.output, t.output
+        for extra in [{'CI': '1'}, {'TERM': 'dumb'}]:
+            t = Terminal(['notify', 'Build complete'], {**env, **extra}); t.finish()
+            assert 'Sending' not in t.output and '\x1b' not in t.output, t.output
+        result = subprocess.run([NODE, str(CLI), 'notify', 'Build complete'],
+                                env=env, capture_output=True, timeout=5)
+        assert result.returncode == 0 and result.stdout == b''
+        assert b'Sending' not in result.stderr and b'\x1b' not in result.stderr
+        print('PASS Notify interruption, resize, JSON, CI and redirected output preserve terminal state')
+
+        endpoint = 'greatping-api-dev.ueldo343.workers.dev'
+        for args in [['login'], ['status'], ['doctor']]:
+            t = Terminal(args, env); t.finish()
+            assert endpoint not in t.output, t.output
+        t = Terminal(['doctor', '--verbose'], env); t.finish()
+        assert endpoint in t.output, t.output
+        for args in [['doctor'], ['doctor', '--verbose']]:
+            t = Terminal(args, {**env, 'GREATPING_TEST_MODE': 'network'}); t.finish(1)
+            assert ('--verbose' in args) == (endpoint in t.output), t.output
+            assert 'Could not reach GreatPing.' in t.output, t.output
+        t = Terminal(['status', '--json'], env, split=True)
+        assert json.loads(t.finish())['server'] == f'https://{endpoint}'
+        assert t.output == '', t.output
+        t = Terminal(['notify', 'Build complete'], {**env, 'GREATPING_TEST_MODE': 'network'})
+        t.finish(1)
+        assert endpoint not in t.output and 'Could not reach GreatPing.' in t.output, t.output
+        print('PASS Service address appears only in explicit diagnostics and compatible status JSON')
+
         cache = config / 'update-check.json'
         def seed(latest='99.0.0', age=0):
             checked = int(time.time() * 1000) - age

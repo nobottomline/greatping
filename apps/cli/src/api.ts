@@ -12,14 +12,6 @@ export class ApiError extends Error {
   }
 }
 
-export function host(config: Config): string {
-  try {
-    return new URL(config.apiUrl).host;
-  } catch {
-    return config.apiUrl;
-  }
-}
-
 export async function api<T>(
   config: Config,
   method: string,
@@ -46,7 +38,7 @@ export async function api<T>(
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') throw error;
     if (error instanceof Error && error.name === 'TimeoutError') throw error;
-    throw new ApiError(0, 'network', `Could not reach GreatPing at ${host(config)}.`);
+    throw new ApiError(0, 'network', 'Could not reach GreatPing.');
   }
 
   if (!response.ok) {

@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import type { MachineMeResponse } from '@greatping/protocol';
-import { api, host as serverHost } from '../api';
+import { api } from '../api';
 import { isPaired, loadConfig } from '../config';
 import { ago, clock } from '../duration';
 import { HOST_IDS, type HostReport, inspectHost } from '../integrations';
@@ -112,12 +112,13 @@ function hostChecks(report: HostReport, fix: boolean, problems: string[]): Check
   return checks;
 }
 
-export async function doctor(options: { fix: boolean }): Promise<number> {
+export async function doctor(options: { fix: boolean; verbose?: boolean }): Promise<number> {
   const problems: string[] = [];
   const config = loadConfig();
   ui.heading('Doctor');
 
   const general: Check[] = [];
+  if (options.verbose) general.push(['Service address', muted(config.apiUrl)]);
   if (!isPaired(config)) {
     problems.push('not paired');
     general.push(['Pairing', bad(`not paired ${muted(`— ${command('greatping login')}`)}`)]);
@@ -126,7 +127,7 @@ export async function doctor(options: { fix: boolean }): Promise<number> {
       const me = await api<MachineMeResponse>(config, 'GET', '/machine/me', {
         signal: AbortSignal.timeout(8000),
       });
-      general.push(['Pairing', ok(`${me.machine.name} ${muted(`on ${serverHost(config)}`)}`)]);
+      general.push(['Pairing', ok(me.machine.name)]);
       general.push([
         'Devices',
         me.devices.some((device) => device.mode === 'first' || device.mode === 'standard')
@@ -145,13 +146,13 @@ export async function doctor(options: { fix: boolean }): Promise<number> {
       general.push([
         'Presence delay',
         delay === undefined
-          ? warn('not supported by this server yet; alerts are sent at once')
+          ? warn('not available yet; alerts are sent at once')
           : muted(
               delay > 0 ? `${delay}s while you are at the computer (change it in the app)` : 'off',
             ),
       ]);
     } catch (error) {
-      problems.push('server check failed');
+      problems.push('could not check pairing with GreatPing');
       general.push(['Pairing', bad(error instanceof Error ? error.message : String(error))]);
     }
   }

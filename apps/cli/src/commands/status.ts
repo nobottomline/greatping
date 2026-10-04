@@ -1,6 +1,6 @@
 import type { MachineMeResponse } from '@greatping/protocol';
-import { ApiError, host } from '../api';
-import { isPaired, loadConfig } from '../config';
+import { ApiError } from '../api';
+import { type Config, isPaired, loadConfig } from '../config';
 import { clock } from '../duration';
 import { HOST_IDS, hostIntegrations, inspectHost } from '../integrations';
 import { HOSTS } from '../integrations/host-hooks';
@@ -60,6 +60,7 @@ export async function status(options: { json?: boolean }): Promise<number> {
         alertsPausedUntil: me?.machine.alertsPausedUntil ?? null,
         claudeHooks: claude,
         integrations,
+        keys: config.keys && config.manifest ? { manifestVersion: config.manifest.version } : null,
         error: problem,
       })}\n`,
     );
@@ -79,10 +80,11 @@ export async function status(options: { json?: boolean }): Promise<number> {
     const summary = hostSummary(id);
     return summary ? [[HOSTS[id].name, summary]] : [];
   });
+  const reloaded = loadConfig();
   ui.rows([
     ['Computer', me?.machine.name ?? muted('unknown')],
     ['Devices', devices],
-    ['Server', host(config)],
+    ['Keys', keysSummary(reloaded)],
     ...(paused
       ? [
           [
@@ -105,4 +107,11 @@ export async function status(options: { json?: boolean }): Promise<number> {
     return 1;
   }
   return 0;
+}
+
+/** Whether this computer holds keys its devices vouched for (docs/device-keys.md). */
+function keysSummary(config: Config): string {
+  if (!config.keys || !config.manifest)
+    return `${color.yellow('none')} ${muted('— paired before keys; greatping logout, then greatping login')}`;
+  return `verified ${muted(`(account manifest v${config.manifest.version})`)}`;
 }

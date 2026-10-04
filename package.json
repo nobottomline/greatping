@@ -7,7 +7,7 @@
   },
   "scripts": {
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm -F greatping test",
+    "test": "pnpm -F @greatping/protocol test && pnpm -F greatping test",
     "build": "pnpm -F greatping build",
     "lint": "pnpm lint:biome && pnpm lint:types && pnpm lint:unused",
     "lint:biome": "biome check .",

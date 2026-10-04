@@ -1,8 +1,20 @@
 import process from 'node:process';
-import type { PairPollResponse, PairStartResponse } from '@greatping/protocol';
-import { api, host } from '../api';
+import {
+  buildPairDeepLink,
+  type PairPollResponse,
+  type PairStartResponse,
+} from '@greatping/protocol';
+import {
+  joinUserCode,
+  type Manifest,
+  newCodeHalf,
+  startCeremony,
+  toBase64Url,
+} from '@greatping/protocol/crypto';
+import { api } from '../api';
 import { type Config, isPaired, loadConfig, requireServer, saveConfig } from '../config';
 import { HOST_IDS, inspectHost } from '../integrations';
+import { newMachineKeys, randomBytes, verifyPairing } from '../keys';
 import { computerName, machinePlatform } from '../machine';
 import { renderQr } from '../qr';
 import { currentDescription, reportMachine } from '../report';
@@ -25,7 +37,7 @@ export async function login(options: { name?: string }): Promise<number> {
   const config = loadConfig();
   requireServer(config);
   if (isPaired(config)) {
-    ui.info(`This computer is already paired ${muted(`(${host(config)})`)}.`);
+    ui.info('This computer is already paired with GreatPing.');
     ui.next(
       `Run ${command('greatping status')} for details or ${command('greatping logout')} to unpair.`,
     );
@@ -33,17 +45,39 @@ export async function login(options: { name?: string }): Promise<number> {
   }
 
   const name = options.name?.trim() || computerName();
+  // The code's second half is this computer's secret: it is shown here and
+  // typed or scanned on the phone, and never sent to the server. CPace on it
+  // lets the computer and the phone confirm each other's keys
+  // (docs/device-keys.md).
+  const keys = newMachineKeys();
+  const secret = newCodeHalf(randomBytes);
+  const session = toBase64Url(randomBytes(16));
+  const state = startCeremony({
+    kind: 'pair',
+    sessionId: session,
+    secret,
+    keys: keys.public,
+    random: randomBytes,
+  });
   const start = await api<PairStartResponse>(config, 'POST', '/pair/start', {
     token: null,
-    body: { machineName: name, platform: machinePlatform(), ...currentDescription() },
+    body: {
+      machineName: name,
+      platform: machinePlatform(),
+      ...currentDescription(),
+      keys: keys.public,
+      session,
+      share: state.share,
+    },
   });
+  const code = joinUserCode(start.lookup, secret);
 
   ui.heading('Pair this computer');
   print(`  Open ${strong('GreatPing')} on your phone or tablet and scan this code:`);
   print();
-  for (const line of renderQr(start.qrPayload, colorEnabled)) print(`  ${line}`);
+  for (const line of renderQr(buildPairDeepLink(code), colorEnabled)) print(`  ${line}`);
   print();
-  print(`  Or enter this code in the app:  ${color.bold(color.cyan(start.userCode))}`);
+  print(`  Or enter this code in the app:  ${color.bold(color.cyan(code))}`);
   print();
 
   const result = await waitForApproval(config, start);
@@ -56,9 +90,39 @@ export async function login(options: { name?: string }): Promise<number> {
     return 130;
   }
 
-  config.machineId = result.machineId;
-  config.machineToken = result.machineToken;
+  const paired: Config = {
+    ...config,
+    machineId: result.machineId,
+    machineToken: result.machineToken,
+  };
+  let verified: { tag: string; manifest: Manifest };
+  try {
+    verified = verifyPairing({
+      state,
+      ceremony: result.ceremony,
+      manifests: result.manifests as Manifest[],
+      accountId: result.accountId,
+      machineId: result.machineId,
+      keys: keys.public,
+    });
+  } catch {
+    // A mistyped code, or someone in between: never keep this pairing.
+    await api(paired, 'DELETE', '/machine/me', { signal: AbortSignal.timeout(5000) }).catch(
+      () => {},
+    );
+    ui.error(
+      'The code did not match, so this computer was not paired.',
+      `Check the code and run ${command('greatping login')} again.`,
+    );
+    return 2;
+  }
+  Object.assign(config, paired, { keys: keys.secret, manifest: verified.manifest });
   saveConfig(config);
+  // The phone checks this tag to trust the computer's keys in turn.
+  await api(config, 'POST', '/machine/me/ceremony', {
+    body: { tag: verified.tag },
+    signal: AbortSignal.timeout(5000),
+  }).catch(() => {});
   const devices = result.deviceCount === 1 ? 'your device' : `your ${result.deviceCount} devices`;
   ui.success(`Paired ${strong(name)}. Alerts now reach ${devices}.`);
 

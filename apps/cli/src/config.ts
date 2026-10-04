@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
+import type { Manifest } from '@greatping/protocol/crypto';
 import { UsageError } from './commands/usage';
 
 // Keep this aligned with the mobile preview. Production rollout is a separate release.
@@ -11,6 +12,10 @@ export interface Config {
   apiUrl: string;
   machineId?: string;
   machineToken?: string;
+  /** This computer's secret keys (base64url), created at pairing (docs/device-keys.md). */
+  keys?: { sign: string; enc: string };
+  /** The latest account manifest version this computer verified. */
+  manifest?: Manifest;
 }
 
 export function configDir(): string {
@@ -47,7 +52,15 @@ export function loadConfig(): Config {
       ? saved.apiUrl.trim().replace(/\/+$/, '')
       : ''
     : DEFAULT_API_URL;
-  return machineId && machineToken ? { apiUrl, machineId, machineToken } : { apiUrl };
+  if (!machineId || !machineToken) return { apiUrl };
+  const config: Config = { apiUrl, machineId, machineToken };
+  const keys = saved.keys as Record<string, unknown> | undefined;
+  if (keys && typeof keys.sign === 'string' && typeof keys.enc === 'string')
+    config.keys = { sign: keys.sign, enc: keys.enc };
+  // Re-verified against the chain whenever it is used; a damaged one is dropped.
+  if (saved.manifest && typeof saved.manifest === 'object')
+    config.manifest = saved.manifest as Manifest;
+  return config;
 }
 
 /** Never send an existing credential to another environment or a config-supplied host. */

@@ -194,12 +194,15 @@ const commands: Record<string, Command> = {
     run: () => resume(),
   },
   doctor: {
-    usage: 'greatping doctor [--fix]',
+    usage: 'greatping doctor [--fix] [--verbose]',
     summary: 'Check pairing, alerts and agent integrations',
     details: ['Runs each installed hook once with a test event that sends nothing.'],
-    options: { fix: { type: 'boolean' } },
-    flags: [['--fix', 'Repair hooks and tools that cannot run or are outdated']],
-    run: (v) => doctor({ fix: Boolean(v.fix) }),
+    options: { fix: { type: 'boolean' }, verbose: { type: 'boolean' } },
+    flags: [
+      ['--fix', 'Repair hooks and tools that cannot run or are outdated'],
+      ['--verbose', 'Include the service address for troubleshooting'],
+    ],
+    run: (v) => doctor({ fix: Boolean(v.fix), verbose: Boolean(v.verbose) }),
   },
   hooks: {
     usage: 'greatping hooks <install|uninstall|status> [claude|codex] [--finished|--no-finished]',
