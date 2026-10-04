@@ -1,4 +1,6 @@
+import { PROJECT_LABELS_HEADER } from '@greatping/protocol';
 import { type Config, requireServer } from './config';
+import { rememberProjectLabels } from './identity';
 import { VERSION } from './version';
 
 /** API failure with the server's error code when there is one. */
@@ -52,6 +54,10 @@ export async function api<T>(
       describe(response.status, code, payload?.error?.message),
     );
   }
+  // The service reports the computer's project-label mode with each alert, so
+  // a change made on a device applies from the next alert on.
+  const mode = response.headers.get(PROJECT_LABELS_HEADER);
+  if (mode === 'folder' || mode === 'hidden') rememberProjectLabels(mode);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }

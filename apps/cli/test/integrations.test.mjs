@@ -14,8 +14,14 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { api } from '../src/api.ts';
 import { DEFAULT_API_URL } from '../src/config.ts';
-import { projectFields, rememberProjectLabels, setProjectOverride } from '../src/identity.ts';
+import {
+  cachedProjectLabels,
+  projectFields,
+  rememberProjectLabels,
+  setProjectOverride,
+} from '../src/identity.ts';
 import { claudeSteps, codexSteps } from '../src/integrations/events.ts';
 import {
   HOSTS,
@@ -34,6 +40,7 @@ import { codexMcpServer } from '../src/integrations/mcp.ts';
 import { runSteps } from '../src/integrations/runner.ts';
 import { installSkill, skillInstalled, uninstallSkill } from '../src/integrations/skill.ts';
 import {
+  claimReport,
   forget,
   lastHookAt,
   markOpen,
@@ -763,6 +770,44 @@ test('greatping run alerts once with the outcome, never the arguments, and keeps
       assert.equal(missing.code, 127);
     } finally {
       await server.close();
+    }
+  });
+});
+
+test('the hourly report keeps its own clock while hooks run every few minutes', async () => {
+  await withHome(() => {
+    const hour = 3600_000;
+    const t0 = 1_790_000_000_000;
+    assert.equal(claimReport(hour, t0), true, 'the first run reports');
+    // A busy session: hooks every five minutes for two hours.
+    const reports = [];
+    for (let t = t0 + 300_000; t <= t0 + 2 * hour; t += 300_000) {
+      touchHeartbeat('claude', t);
+      if (claimReport(hour, t)) reports.push(t);
+    }
+    assert.deepEqual(reports, [t0 + hour, t0 + 2 * hour]);
+    // Ending a session prunes alert state but keeps the report clock.
+    pruneAlerts(t0 + 2 * hour);
+    assert.equal(claimReport(hour, t0 + 2 * hour + 60_000), false);
+  });
+});
+
+test('every service answer carrying the project-label mode updates the cached mode', async () => {
+  await withHome(async () => {
+    const originalFetch = globalThis.fetch;
+    let mode = 'folder';
+    globalThis.fetch = async () =>
+      new Response('{}', { status: 201, headers: { 'x-greatping-project-labels': mode } });
+    try {
+      assert.equal(cachedProjectLabels(), 'hidden');
+      const config = { apiUrl: DEFAULT_API_URL, machineId: 'mch_1', machineToken: 'mc_x' };
+      await api(config, 'POST', '/requests', { body: {} });
+      assert.equal(cachedProjectLabels(), 'folder');
+      mode = 'hidden';
+      await api(config, 'POST', '/requests', { body: {} });
+      assert.equal(cachedProjectLabels(), 'hidden');
+    } finally {
+      globalThis.fetch = originalFetch;
     }
   });
 });

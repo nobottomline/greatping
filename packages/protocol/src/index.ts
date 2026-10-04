@@ -363,6 +363,8 @@ const deviceDescriptionSchema = {
 export const registerDeviceBodySchema = z.object({
   ...deviceDescriptionSchema,
   pushToken: z.string().optional(),
+  /** Optional account-wide product analytics; existing clients remain opted out. */
+  analyticsEnabled: z.boolean().optional(),
 });
 export type RegisterDeviceBody = z.infer<typeof registerDeviceBodySchema>;
 
@@ -410,7 +412,16 @@ export interface MeResponse {
   routes: Route[];
   /** The account's latest manifest version; null for an account created before keys. */
   manifestVersion: number | null;
+  /** Absent on older servers. No credential is ever used as an analytics identity. */
+  analytics?: AccountAnalytics;
 }
+
+export interface AccountAnalytics {
+  enabled: boolean;
+  distinctId: string | null;
+}
+
+export const analyticsPreferencesSchema = z.object({ enabled: z.boolean() }).strict();
 
 export interface ListEventsResponse {
   events: AccountEvent[];
@@ -498,6 +509,13 @@ export type PauseMachineBody = z.infer<typeof pauseMachineBodySchema>;
 export interface PauseMachineResponse {
   alertsPausedUntil: number | null;
 }
+
+/**
+ * Sent with every request a computer creates: its current project-label mode,
+ * so a change made on a device reaches the computer with its next alert
+ * instead of its next hourly report.
+ */
+export const PROJECT_LABELS_HEADER = 'x-greatping-project-labels';
 
 /**
  * A computer chooses whether it labels its alerts with project folder names.

@@ -12,7 +12,15 @@ import { correlationId, loadSettings, projectFields, readSettings, threadId } fr
 import { reportMachine } from '../report';
 import { type ClaudeAlert, claudeSteps, codexSteps, type HookInput, type HookStep } from './events';
 import { isAway } from './presence';
-import { forget, type HostId, markOpen, openedAgo, pruneAlerts, touchHeartbeat } from './state';
+import {
+  claimReport,
+  forget,
+  type HostId,
+  markOpen,
+  openedAgo,
+  pruneAlerts,
+  touchHeartbeat,
+} from './state';
 
 /** The event `greatping doctor` sends to check that an installed hook runs. */
 export const PROBE_EVENT = 'GreatPingProbe';
@@ -128,7 +136,7 @@ export async function runHook(
   try {
     const input = await readHookInput();
     if (!input || input.hook_event_name === PROBE_EVENT) return 0;
-    const previousRun = touchHeartbeat(host);
+    touchHeartbeat(host);
     // A session or shell can opt out: GREATPING_DISABLE=1 claude …
     if (process.env.GREATPING_DISABLE && process.env.GREATPING_DISABLE !== '0') return 0;
     const steps =
@@ -143,9 +151,7 @@ export async function runHook(
       await runSteps(host, input.session_id, steps, config, input.cwd);
     }
     if (steps.some((step) => step.op === 'resolve-session')) pruneAlerts();
-    if (previousRun === null || Date.now() - previousRun > REPORT_INTERVAL_MS) {
-      await reportMachine(config);
-    }
+    if (claimReport(REPORT_INTERVAL_MS)) await reportMachine(config);
   } catch {
     // Deliberately silent.
   }

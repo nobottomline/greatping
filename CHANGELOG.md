@@ -3,6 +3,13 @@
 Source synchronization and npm publication are separate. Entries under
 Unreleased are not available merely by installing npm `latest`.
 
+## 0.3.2 — 2026-10-04
+
+- Apply project-name visibility changes made on a device from the computer's
+  next alert, using the service's current preference in successful responses.
+- Keep the hourly computer report on its own clock so frequent agent hooks
+  do not indefinitely postpone preference and integration refreshes.
+
 ## 0.3.1 — 2026-10-04
 
 - Check npm explicitly with `greatping update --check`, including JSON output

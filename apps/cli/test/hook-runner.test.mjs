@@ -29,6 +29,7 @@ function withHook(run) {
   );
   // Machine reporting is covered separately; keep this fixture on the alert path.
   writeFileSync(join(configDir, 'hook-state', 'claude.seen'), '');
+  writeFileSync(join(configDir, 'hook-state', 'report.seen'), '');
   const calls = () =>
     existsSync(records)
       ? readFileSync(records, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse)

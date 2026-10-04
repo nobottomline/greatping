@@ -130,3 +130,29 @@ export function touchHeartbeat(host: HostId, now = Date.now()): number | null {
   }
   return previous;
 }
+
+// `.seen` keeps it out of `pruneAlerts`, like the per-host heartbeats.
+const reportPath = () => join(root(), 'report.seen');
+
+/**
+ * Whether the hourly machine report is due. It keeps its own clock: hooks of a
+ * busy session run every few minutes, so the time since the last hook never
+ * reaches an hour while the computer is in use. Claims the slot when due, so
+ * hooks running at once do not all report.
+ */
+export function claimReport(intervalMs: number, now = Date.now()): boolean {
+  try {
+    const last = statSync(reportPath()).mtimeMs;
+    if (now - last < intervalMs) return false;
+    utimesSync(reportPath(), now / 1000, now / 1000);
+  } catch {
+    try {
+      mkdirSync(root(), { recursive: true, mode: 0o700 });
+      writeFileSync(reportPath(), '', { mode: 0o600 });
+      utimesSync(reportPath(), now / 1000, now / 1000);
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
