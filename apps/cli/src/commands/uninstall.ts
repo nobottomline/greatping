@@ -1,10 +1,9 @@
-import { spawn } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync, realpathSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
 import { ApiError, api } from '../api';
 import { configDir, configPath, isPaired, loadConfig } from '../config';
+import { detectInstallation, managerOutput, verifyRemoval } from '../installation';
 import { HOST_IDS } from '../integrations';
-import { findOnPath } from '../integrations/launcher';
 import { ownershipPath } from '../integrations/ownership';
 import {
   backupRemoval,
@@ -21,45 +20,6 @@ interface UninstallOptions {
   yes: boolean;
   localOnly: boolean;
   json: boolean;
-}
-
-function globalPackage(): string | null {
-  if (!process.argv[1]) return null;
-  const script = realpathSync(process.argv[1]);
-  const root = dirname(dirname(script));
-  if (!root.endsWith(join('node_modules', 'greatping'))) return null;
-  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-  return manifest.name === 'greatping' && !lstatSync(root).isSymbolicLink() ? root : null;
-}
-async function npm(args: string[]): Promise<string> {
-  const command = findOnPath('npm');
-  if (!command)
-    throw new Error('npm is unavailable. Remove the CLI through its original package manager.');
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      shell: process.platform === 'win32',
-    });
-    let output = '';
-    // Do not expose arbitrary package-manager output, which can contain config.
-    child.stdout.on('data', (chunk) => {
-      output = (output + chunk).slice(-8192);
-    });
-    child.stderr.resume();
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      reject(new Error('npm removal timed out.'));
-    }, 30000);
-    child.once('error', (error) => {
-      clearTimeout(timer);
-      reject(error);
-    });
-    child.once('exit', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve(output.trim());
-      else reject(new Error('npm failed. Remove the CLI through its original package manager.'));
-    });
-  });
 }
 
 export async function uninstall(options: UninstallOptions): Promise<number> {
@@ -128,19 +88,22 @@ export async function uninstall(options: UninstallOptions): Promise<number> {
     (a, b) =>
       Number(a.id.endsWith('installation.json')) - Number(b.id.endsWith('installation.json')),
   );
-  const root = globalPackage();
+  const installation = detectInstallation();
+  const managed = !['local', 'unknown'].includes(installation.manager);
+  const root = managed ? installation.root : null;
   const binary: RemovalAction[] = root
     ? [
         {
           id: 'package',
-          label: 'Remove the global GreatPing CLI through npm after verifying its installation',
+          label: `Remove the global GreatPing CLI through ${installation.manager}`,
+          ...(!installation.removal
+            ? { problem: 'The original package manager is unavailable.' }
+            : {}),
           run: async () => {
-            const modules = await npm(['root', '--global']);
-            if (realpathSync(modules) !== realpathSync(dirname(root)))
-              throw new Error(
-                'This CLI is not owned by the active global npm installation. Use its original package manager to remove it.',
-              );
-            await npm(['uninstall', '--global', 'greatping', '--ignore-scripts']);
+            await verifyRemoval(installation);
+            const removal = installation.removal;
+            if (!removal) throw new Error('The original package manager is unavailable.');
+            await managerOutput(removal.executable, removal.args);
             if (existsSync(root)) throw new Error('The package manager left the CLI installed.');
           },
         },
@@ -149,7 +112,7 @@ export async function uninstall(options: UninstallOptions): Promise<number> {
   const plan = [...actions, ...pairing, ...backups, ...local, ...binary];
   if (options.json && options.dryRun)
     process.stdout.write(
-      `${JSON.stringify({ dryRun: true, actions: plan.map(({ id, label, problem }) => ({ id, label, ...(problem ? { problem } : {}) })), package: root ? 'global' : 'checkout-or-external', serverRevocation: options.localOnly ? 'skipped' : isPaired(config) ? 'planned' : 'not-paired' })}\n`,
+      `${JSON.stringify({ dryRun: true, actions: plan.map(({ id, label, problem }) => ({ id, label, ...(problem ? { problem } : {}) })), package: root ? 'global' : 'checkout-or-external', packageManager: installation.manager, serverRevocation: options.localOnly ? 'skipped' : isPaired(config) ? 'planned' : 'not-paired' })}\n`,
     );
   ui.heading(options.dryRun ? 'GreatPing removal plan' : 'Uninstall GreatPing');
   for (const action of plan) {
@@ -176,19 +139,39 @@ export async function uninstall(options: UninstallOptions): Promise<number> {
       return Number(process.exitCode ?? 0);
     }
   }
+  // Check the owner before revoking a credential or touching integrations.
+  if (root) {
+    try {
+      await verifyRemoval(installation);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Could not verify the package manager.';
+      ui.error(message);
+      if (options.json)
+        process.stdout.write(
+          `${JSON.stringify({
+            dryRun: false,
+            complete: false,
+            results: [{ id: 'package', label: binary[0]?.label, status: 'failed', error: message }],
+            serverRevocation: 'not-attempted',
+          })}\n`,
+        );
+      return 1;
+    }
+  }
   const results = await executeRemoval([...actions, ...pairing, ...backups]);
   if (results.every((r) => r.status === 'removed')) {
     results.push(
       ...(await executeRemoval(local.filter((action) => action.id !== 'local:installation.json'))),
     );
+    if (results.every((r) => r.status === 'removed'))
+      results.push(...(await executeRemoval(binary)));
     if (results.every((r) => r.status === 'removed')) {
       results.push(
         ...(await executeRemoval(
           local.filter((action) => action.id === 'local:installation.json'),
         )),
       );
-    }
-    if (results.every((r) => r.status === 'removed')) {
       results.push(
         ...(await executeRemoval([
           {
@@ -199,8 +182,6 @@ export async function uninstall(options: UninstallOptions): Promise<number> {
         ])),
       );
     }
-    if (results.every((r) => r.status === 'removed'))
-      results.push(...(await executeRemoval(binary)));
   }
   for (const result of results) {
     if (result.status === 'failed') ui.error(result.label, result.error);

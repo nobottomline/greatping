@@ -42,23 +42,46 @@ The code has two halves, `ABCD-EFGH`. The first finds the pairing on the service
 
 ## Update notices
 
+Run `greatping update --check` (or `greatping update`) to check npm now and see
+the installed/latest versions and the update command for this installation.
+`--json` returns the same information without animation or other output.
+Explicit checks bypass the cache and notifier opt-out. A failed lookup exits
+with `1` and reports availability as unknown; it does not claim you are current.
+
 Interactive commands check npm's `latest` tag in a detached process, at most once
-per day. A newer stable version produces a short notice on stderr **after** the
-command's result, with `npm install --global greatping@latest`. It is a suggestion;
-GreatPing never installs an update automatically. After a quick first command,
-the notice may appear on the next command once the background check finishes.
+per hour. Help, bare startup and version commands can wait up to 800 ms for that
+worker; other commands never wait for it. A newer stable version produces a short
+notice on stderr **after** the result. `--version` keeps stdout as the version
+alone; redirected version output has no notice. GreatPing never installs updates
+automatically. If the background lookup finishes later, the next interactive
+command shows the notice.
 
 The check has a three-second HTTP timeout and a five-second total lifetime. A
-failed attempt is silent and waits at least an hour before retrying. The cache
+failed automatic attempt is silent and waits at least 15 minutes before retrying. The cache
 (`update-check.json` beside the CLI config) is written atomically with user-only
 permissions; results older than seven days are not advertised. Only the public
 package tag is requested from `registry.npmjs.org`, without pairing credentials,
 npm credentials or project information. HTTP redirects are refused.
 
 Checks and notices are disabled for redirected output, JSON, CI, dumb terminals,
-version commands, hooks, MCP and uninstall. Use `--no-update-check` or
+hooks, MCP and uninstall. Use `--no-update-check` or
 `NO_UPDATE_NOTIFIER=1` to disable them for other commands. Color settings apply to
 the notice too. `uninstall` removes the update cache with the other local state.
+
+Installation detection uses the running package and filesystem ownership evidence,
+not merely the presence of a manager on PATH. It recognizes npm global prefixes,
+Vite+ recorded packages and shims, pnpm global layouts, Yarn Classic globals,
+Bun's global store and Volta package images. nvm/fnm/asdf-managed Node runtimes
+use the owning package manager; npm update instructions pin the existing prefix
+so a different runtime cannot receive the update by accident. Unknown/custom
+layouts and source checkouts get a manual instruction. `doctor --verbose` shows
+the detected manager, package location, stable launcher and update command.
+
+For Vite+ installations use `vp install -g greatping@latest`. Its global store
+is separate from npm's globals, even when npm itself runs through Vite+.
+Hooks and MCP use the verified Vite+ shim, which survives package/Node upgrades.
+Bare startup uses the saved pairing only for the next-step hint; `status` performs
+the server check. A saved credential is not presented as a verified live session.
 
 After `login`, `status`, `setup` and `doctor`, and at most hourly from hooks, the CLI reports its OS name and version, CPU architecture, CLI version and, per agent (Claude Code, Codex), whether its hooks work, whether they also alert on finished turns, whether the MCP tools and skill are installed, and when a hook last ran. Devices show this under Agents. It never sends user names, paths, addresses or hardware identifiers. A computer cannot rename itself or change which devices it alerts; that is done in the app. It can pause its own alerts.
 
@@ -168,11 +191,15 @@ state. It revokes the computer on the server. Account deletion is a separate
 operation in the app. Existing host sessions may retain loaded hooks or MCP
 connections; restart them after removing their integration.
 
-A CLI running from a verified global npm installation is removed with
-`npm uninstall --global greatping --ignore-scripts` at the end. The active npm
-global root must match the running package. Checkouts, linked development
-packages and unverified package-manager installations are preserved; use their
-original manager to remove the package. No source checkout is deleted.
+A recognized global installation is removed through its owning manager at the
+end, after a read-only ownership preflight. npm targets the exact installed
+prefix; Vite+ uses `vp uninstall -g greatping`; pnpm, Yarn Classic, Bun and Volta
+use their own global removal commands. A missing manager or mismatched ownership
+stops before server revocation or local cleanup. The ownership journal survives
+a package-removal failure so cleanup can be retried. Checkouts, linked development
+packages and unverified installations are preserved with a manual instruction.
+No source checkout is deleted. Native Windows manager removal is separate from
+the Windows archive qualification, which checks installation and offline commands.
 
 Setup records owned components in `installation.json` under GreatPing's config
 directory. The journal contains paths, invocation identities and hashes, never

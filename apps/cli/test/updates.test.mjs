@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { configDir } from '../src/config.ts';
-import { refreshUpdateCache } from '../src/updates.ts';
+import { checkForUpdates, refreshUpdateCache } from '../src/updates.ts';
 
 async function isolated(run) {
   const root = mkdtempSync(join(tmpdir(), 'greatping-updates-'));
@@ -113,5 +113,37 @@ test('a pending check cannot overwrite a newer reservation or recreate an uninst
       } catch (error) {
         if (error.code !== 'ENOENT') throw error;
       }
+    }
+  }));
+
+test('explicit checks bypass fresh cached metadata and return honest failure JSON', () =>
+  isolated(async (file) => {
+    mkdirSync(configDir(), { recursive: true });
+    writeFileSync(
+      file,
+      JSON.stringify({ attemptedAt: Date.now(), checkedAt: Date.now(), latest: '0.0.0' }),
+    );
+    const original = process.stdout.write;
+    let output = '';
+    process.stdout.write = (chunk) => {
+      output += chunk;
+      return true;
+    };
+    try {
+      globalThis.fetch = async () => Response.json({ latest: '99.0.0' });
+      assert.equal(await checkForUpdates({ json: true }), 0);
+      assert.equal(JSON.parse(output).latest, '99.0.0');
+      assert.equal(JSON.parse(output).updateAvailable, true);
+      assert.equal(JSON.parse(readFileSync(file)).latest, '99.0.0');
+      output = '';
+      globalThis.fetch = async () => {
+        throw new Error('offline');
+      };
+      assert.equal(await checkForUpdates({ json: true }), 1);
+      assert.equal(JSON.parse(output).latest, null);
+      assert.equal(JSON.parse(output).updateAvailable, null);
+      assert.equal(JSON.parse(readFileSync(file)).latest, '99.0.0');
+    } finally {
+      process.stdout.write = original;
     }
   }));

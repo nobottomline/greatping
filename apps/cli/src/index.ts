@@ -14,10 +14,11 @@ import { status } from './commands/status';
 import { test } from './commands/test';
 import { uninstall } from './commands/uninstall';
 import { UsageError } from './commands/usage';
+import { isPaired, loadConfig } from './config';
 import { runHook } from './integrations/runner';
 import { startMcp } from './mcp';
 import { color, command, muted, print, ui } from './ui';
-import { prepareUpdateNotice } from './updates';
+import { checkForUpdates, prepareUpdateNotice } from './updates';
 import { MIN_NODE_VERSION, supportsNodeVersion, VERSION } from './version';
 
 type Options = Record<string, { type: 'string' | 'boolean'; short?: string }>;
@@ -36,6 +37,23 @@ interface Command {
 }
 
 const commands: Record<string, Command> = {
+  update: {
+    usage: 'greatping update [--check] [--json]',
+    summary: 'Check npm for updates and show how to update this installation',
+    details: [
+      'Checks npm now, bypassing the automatic cache. Does not install or remove packages.',
+    ],
+    options: { check: { type: 'boolean' }, json: { type: 'boolean' } },
+    flags: [
+      ['--check', 'Check only (the default)'],
+      ['--json', 'Print versions and installation information as JSON'],
+    ],
+    run: (v, p) => {
+      if (p.length)
+        throw new UsageError('update', 'Update checks do not take positional arguments.');
+      return checkForUpdates({ json: Boolean(v.json) });
+    },
+  },
   login: {
     usage: 'greatping login [--name <name>]',
     summary: 'Pair this computer with your GreatPing devices',
@@ -293,7 +311,11 @@ function printHelp(): void {
   print(`    ${command('-h, --help')}         Help for a command: greatping <command> --help`);
   print(`    ${command('-v, --version')}      Print the version`);
   print();
-  print(`  ${muted(`Get started with ${command('greatping login')}.`)}`);
+  print(
+    isPaired(loadConfig())
+      ? `  ${muted(`Pairing saved on this computer. Check your devices with ${command('greatping status')}.`)}`
+      : `  ${muted(`Get started with ${command('greatping login')}.`)}`,
+  );
   print();
 }
 
@@ -388,7 +410,7 @@ const argv = process.argv.slice(2);
 const showUpdateNotice = supportsNodeVersion(process.versions.node)
   ? prepareUpdateNotice(argv)
   : () => {};
-main(argv)
+void main(argv)
   .then((code) => {
     process.exitCode = code;
   })
@@ -413,4 +435,4 @@ main(argv)
     }
     process.exitCode = 1;
   })
-  .finally(showUpdateNotice);
+  .then(showUpdateNotice);

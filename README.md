@@ -22,6 +22,11 @@ Use the [release notes](https://github.com/nobottomline/greatping/releases) and
 [CHANGELOG.md](CHANGELOG.md) to distinguish released and unreleased behavior.
 An automatic source sync does not publish a new npm version.
 
+`greatping update --check` checks npm now and shows how to update the running
+installation. Interactive update notices use the detected package manager.
+If Vite+ owns your command, use `vp install -g greatping@latest`; Vite+ global
+packages and npm global packages are separate installations.
+
 ## How it works
 
 - **Automatic alerts.** `greatping setup` adds hooks to Claude Code and Codex. Claude Code alerts when it asks a question, needs a permission (not when auto mode decides) or an MCP server asks for input. Codex alerts when it finishes a turn. The alert clears when the prompt closes, you type, or the turn ends.
@@ -51,8 +56,8 @@ npx skills add nobottomline/greatping
 
 `greatping uninstall --dry-run` previews cleanup without changes.
 `greatping uninstall` confirms removal of detected integrations, pairing and
-local state. Global npm installs are removed through npm when ownership can be
-verified; source checkouts are preserved. Changed or unowned files are reported
+local state. Recognized global installs are removed through their original
+manager after ownership verification; source checkouts are preserved. Changed or unowned files are reported
 and preserved. See the [CLI removal reference](apps/cli/README.md#removal).
 
 ## This repository

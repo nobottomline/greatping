@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -111,6 +112,18 @@ function pair(root) {
     machineId: 'test-machine',
     machineToken: 'PRIVATE TOKEN',
   });
+}
+
+function installedPackage(packageRoot) {
+  mkdirSync(join(packageRoot, 'dist'), { recursive: true });
+  cpSync(new URL('../dist', import.meta.url), join(packageRoot, 'dist'), { recursive: true });
+  const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  json(join(packageRoot, 'package.json'), manifest);
+  symlinkSync(
+    new URL('../node_modules', import.meta.url).pathname,
+    join(packageRoot, 'node_modules'),
+  );
+  return manifest;
 }
 
 test('dry-run plans every installed component without writes, manager calls or network', async () =>
@@ -258,18 +271,9 @@ test('uninstall preserves changed backups and corrupt ownership records', async 
 
 test('global npm removal runs last and verifies the running package root', async () =>
   home(({ root, bin, env }) => {
-    const modules = join(root, 'global', 'node_modules');
+    const modules = join(root, 'global', 'lib', 'node_modules');
     const packageRoot = join(modules, 'greatping');
-    mkdirSync(join(packageRoot, 'dist'), { recursive: true });
-    cpSync(new URL('../dist', import.meta.url), join(packageRoot, 'dist'), { recursive: true });
-    json(
-      join(packageRoot, 'package.json'),
-      JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')),
-    );
-    symlinkSync(
-      new URL('../node_modules', import.meta.url).pathname,
-      join(packageRoot, 'node_modules'),
-    );
+    installedPackage(packageRoot);
     pair(root);
     env.TEST_MODULES = modules;
     script(
@@ -291,10 +295,91 @@ test('global npm removal runs last and verifies the running package root', async
     assert.deepEqual(
       readFileSync(join(root, 'npm-calls.jsonl'), 'utf8').trim().split('\n').map(JSON.parse),
       [
-        ['root', '--global'],
-        ['uninstall', '--global', 'greatping', '--ignore-scripts'],
+        ['root', '--global', '--prefix', realpathSync(join(root, 'global'))],
+        ['root', '--global', '--prefix', realpathSync(join(root, 'global'))],
+        [
+          'uninstall',
+          '--global',
+          '--prefix',
+          realpathSync(join(root, 'global')),
+          'greatping',
+          '--ignore-scripts',
+        ],
       ],
     );
+  }));
+
+test('a mismatched global manager preserves pairing and performs no server revocation', async () =>
+  home(({ root, bin, env }) => {
+    const packageRoot = join(root, 'global/lib/node_modules/greatping');
+    installedPackage(packageRoot);
+    pair(root);
+    script(join(bin, 'npm'), `console.log(${JSON.stringify(root)});`);
+    const config = join(root, '.config/greatping/config.json');
+    const before = readFileSync(config, 'utf8');
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--import',
+        fixtureFetch,
+        join(packageRoot, 'dist/index.js'),
+        'uninstall',
+        '--yes',
+        '--json',
+      ],
+      { env, encoding: 'utf8', timeout: 10000 },
+    );
+    assert.equal(result.status, 1, result.stderr);
+    assert.equal(JSON.parse(result.stdout).serverRevocation, 'not-attempted');
+    assert.equal(JSON.parse(result.stdout).complete, false);
+    assert.equal(readFileSync(config, 'utf8'), before);
+    assert.equal(existsSync(env.GREATPING_TEST_LOG), false);
+    assert.ok(existsSync(packageRoot));
+  }));
+
+test('Vite+ removal uses the recorded owner, runs last and never calls npm', async () =>
+  home(({ root, bin, env }) => {
+    const store = join(root, 'vite-data/packages/greatping');
+    const installId = '2715ef2b-1831-40e2-9d40-69121bf6c137';
+    const packageRoot = join(store, installId, 'lib/node_modules/greatping');
+    const manifest = installedPackage(packageRoot);
+    json(`${store}.json`, {
+      name: 'greatping',
+      installId,
+      version: manifest.version,
+      bins: ['greatping'],
+    });
+    pair(root);
+    env.TEST_PACKAGE_ROOT = packageRoot;
+    script(
+      join(bin, 'vp'),
+      `const fs=require('node:fs'),path=require('node:path');
+      fs.writeFileSync(path.join(process.env.HOME,'vp-calls.json'),JSON.stringify(process.argv.slice(2)));
+      if(fs.existsSync(path.join(process.env.XDG_CONFIG_HOME,'greatping/config.json'))) process.exit(4);
+      fs.rmSync(process.env.TEST_PACKAGE_ROOT,{recursive:true});`,
+    );
+    symlinkSync(join(bin, 'vp'), join(bin, 'greatping'));
+    script(join(bin, 'npm'), 'process.exit(9);');
+    const execute = (args) =>
+      spawnSync(
+        process.execPath,
+        ['--import', fixtureFetch, join(packageRoot, 'dist/index.js'), ...args],
+        { env, encoding: 'utf8', timeout: 10000 },
+      );
+    const before = hashes(root);
+    const preview = execute(['uninstall', '--dry-run', '--json']);
+    assert.equal(preview.status, 0, preview.stderr);
+    assert.equal(JSON.parse(preview.stdout).packageManager, 'vite-plus');
+    assert.deepEqual(hashes(root), before);
+    const result = execute(['uninstall', '--yes', '--json']);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(JSON.parse(result.stdout).complete, true);
+    assert.deepEqual(JSON.parse(readFileSync(join(root, 'vp-calls.json'))), [
+      'uninstall',
+      '-g',
+      'greatping',
+    ]);
+    assert.equal(existsSync(packageRoot), false);
   }));
 
 test('an already revoked computer can finish uninstall', async () =>

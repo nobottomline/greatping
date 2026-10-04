@@ -8,6 +8,7 @@ globalThis.fetch = async (url, options = {}) => {
     if (options.headers.authorization) throw new Error('Credentials sent to npm');
     if (process.env.GREATPING_TEST_LOG) appendFileSync(process.env.GREATPING_TEST_LOG, 'npm\n');
     if (process.env.GREATPING_TEST_NPM === 'hang') await new Promise(() => {});
+    if (process.env.GREATPING_TEST_NPM === 'offline') throw new Error('Fixture offline');
     return Response.json({ latest: '99.0.0' });
   }
   if (parsed.origin !== 'https://greatping-api-dev.ueldo343.workers.dev')

@@ -3,6 +3,20 @@
 Source synchronization and npm publication are separate. Entries under
 Unreleased are not available merely by installing npm `latest`.
 
+## 0.3.1 — 2026-10-04
+
+- Check npm explicitly with `greatping update --check`, including JSON output
+  and honest offline failures. Automatic checks refresh hourly; terminal
+  startup/help/version briefly await a pending lookup and show notices on stderr.
+- Use saved pairing state for the startup hint instead of always suggesting login.
+- Detect the running installation for update instructions, diagnostics and
+  removal: npm prefixes, Vite+, pnpm globals, Yarn Classic, Bun and Volta.
+  Preserve custom/unverified installations and source checkouts.
+- Use the stable Vite+ shim for hooks and MCP even when its Node runtime
+  shadows that shim in a child process's PATH.
+- Verify package ownership before revoking pairing or deleting local state;
+  retain the ownership journal when package removal fails.
+
 ## 0.3.0 — 2026-10-04
 
 - Pair computers through CPace with explicit key confirmation. Verify and pin

@@ -1,8 +1,12 @@
 import { spawnSync } from 'node:child_process';
-import { accessSync, constants, existsSync, realpathSync, statSync } from 'node:fs';
-import { delimiter, isAbsolute, join } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { isAbsolute } from 'node:path';
 import process from 'node:process';
+import { detectInstallation } from '../installation';
 import { supportsNodeVersion } from '../version';
+import { findAllOnPath, findOnPath, isExecutable } from './executables';
+
+export { findOnPath } from './executables';
 
 /**
  * How another program (a host hook, an MCP client) starts this CLI. The
@@ -20,36 +24,6 @@ import { supportsNodeVersion } from '../version';
 export interface Launcher {
   command: string;
   args: string[];
-}
-
-function isExecutable(path: string): boolean {
-  try {
-    if (!statSync(path).isFile()) return false;
-    if (process.platform !== 'win32') accessSync(path, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Every executable named `name` on PATH, in order, like `which -a`. */
-export function findAllOnPath(name: string, path = process.env.PATH ?? ''): string[] {
-  const extensions =
-    process.platform === 'win32' ? (process.env.PATHEXT ?? '.EXE;.CMD').split(';') : [''];
-  const found: string[] = [];
-  for (const dir of path.split(delimiter)) {
-    if (!dir) continue;
-    for (const extension of extensions) {
-      const candidate = join(dir, `${name}${extension}`);
-      if (isExecutable(candidate) && !found.includes(candidate)) found.push(candidate);
-    }
-  }
-  return found;
-}
-
-/** The first executable named `name` on PATH, like `which`. */
-export function findOnPath(name: string, path = process.env.PATH ?? ''): string | null {
-  return findAllOnPath(name, path)[0] ?? null;
 }
 
 /** Paths that belong to one installed Node version or one shell session. */
@@ -76,6 +50,8 @@ function nodeVersion(node: string): string | null {
 export function currentLauncher(): Launcher {
   const script = process.argv[1] ? realpath(process.argv[1]) : null;
   if (!script) throw new Error('Could not locate the GreatPing executable.');
+  const managed = detectInstallation(script).launcher;
+  if (managed) return { command: managed, args: [] };
   const installed = findOnPath('greatping');
   if (installed && realpath(installed) === script) return { command: installed, args: [] };
   const stableNode = findAllOnPath('node')

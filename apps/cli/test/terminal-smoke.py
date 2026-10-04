@@ -215,7 +215,7 @@ try:
         final = screen(t.output, t.cols)
         assert 'Waiting' not in final and 'Ship it' in final and 'Update available' in final, final
         assert final.index('Ship it') < final.index('Update available'), final
-        assert 'npm install --global greatping@latest' in final
+        assert 'original package manager or source checkout' in final
         assert cache.stat().st_mtime_ns > 0
         print('PASS A cached newer npm version appears after the result with the update command')
 
@@ -246,7 +246,6 @@ try:
         seed()
         before = cache.read_bytes()
         for args, extra, split in [(['--help', '--no-update-check'], {}, False),
-                                   (['--version'], {}, False), (['version'], {}, False),
                                    (['ask', 'Deploy?', '--json'], {}, False),
                                    (['uninstall', '--dry-run'], {}, False),
                                    (['--help'], {'CI': '1'}, False),
@@ -256,7 +255,44 @@ try:
             t = Terminal(args, {**updates, **extra}, split=split); t.finish()
             assert 'Update available' not in t.output, t.output
             assert cache.read_bytes() == before
-        print('PASS JSON, version, uninstall, CI, dumb terminals, pipes and opt-out skip checks')
+        print('PASS JSON, uninstall, CI, dumb terminals, pipes and opt-out skip checks')
+
+        for args in [[], ['--version'], ['version']]:
+            seed()
+            t = Terminal(args, updates); t.finish()
+            assert 'Update available' in t.output
+        t = Terminal(['--version'], updates, split=True)
+        assert t.finish().strip() == VERSION and 'Update available' not in t.output
+        t = Terminal([], env); t.finish()
+        assert 'Pairing saved on this computer' in t.output
+        assert 'Get started with' not in t.output
+        print('PASS Paired startup and terminal version notices preserve piped version output')
+
+        seed(VERSION)
+        t = Terminal(['update', '--check', '--json'], env, split=True)
+        result = json.loads(t.finish())
+        assert result['latest'] == '99.0.0' and result['updateAvailable'] is True
+        assert t.output == ''
+        print('PASS Explicit update checks bypass a fresh cache and notifier opt-out with clean JSON')
+
+        t = Terminal(['update', '--check', '--json'], {**env, 'GREATPING_TEST_NPM': 'offline'}, split=True)
+        result = json.loads(t.finish(1))
+        assert result['latest'] is None and result['updateAvailable'] is None and result['error']
+        assert t.output == ''
+
+        checked = int(time.time() * 1000) - 90 * 60 * 1000
+        cache.write_text(json.dumps({'attemptedAt': checked, 'checkedAt': checked, 'latest': VERSION}))
+        t = Terminal([], updates); t.finish()
+        assert 'Update available' in t.output and '99.0.0' in t.output
+        print('PASS Startup discovers an update after one hour; explicit offline checks report unknown')
+
+        t = Terminal(['update', '--check'], {**env, 'GREATPING_TEST_NPM': 'hang'})
+        t.wait('Checking npm for updates')
+        os.killpg(t.process.pid, signal.SIGINT); t.finish(130)
+        final = screen(t.output, t.cols)
+        assert 'cancelled' in final and 'Checking npm' not in final
+        assert '\x1b[?25h' in t.output
+        print('PASS Interrupting an update check clears progress and restores the cursor')
 
         cache.unlink()
         log = root / 'npm-log'

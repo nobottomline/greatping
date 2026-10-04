@@ -3,6 +3,7 @@ import type { MachineMeResponse } from '@greatping/protocol';
 import { api } from '../api';
 import { isPaired, loadConfig } from '../config';
 import { ago, clock } from '../duration';
+import { detectInstallation } from '../installation';
 import { HOST_IDS, type HostReport, inspectHost } from '../integrations';
 import { installHooks, selectedAlerts } from '../integrations/host-hooks';
 import { currentLauncher } from '../integrations/launcher';
@@ -118,7 +119,22 @@ export async function doctor(options: { fix: boolean; verbose?: boolean }): Prom
   ui.heading('Doctor');
 
   const general: Check[] = [];
-  if (options.verbose) general.push(['Service address', muted(config.apiUrl)]);
+  const installation = detectInstallation();
+  general.push([
+    'Installation',
+    muted(
+      installation.manager === 'local' || installation.manager === 'unknown'
+        ? 'source checkout or external installation'
+        : installation.manager,
+    ),
+  ]);
+  if (options.verbose) {
+    general.push(['Service address', muted(config.apiUrl)]);
+    if (installation.root) general.push(['CLI location', muted(installation.root)]);
+    if (installation.launcher) general.push(['CLI launcher', muted(installation.launcher)]);
+    if (installation.updateCommand)
+      general.push(['Update command', muted(installation.updateCommand)]);
+  }
   if (!isPaired(config)) {
     problems.push('not paired');
     general.push(['Pairing', bad(`not paired ${muted(`— ${command('greatping login')}`)}`)]);
