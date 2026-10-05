@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { basename } from 'node:path';
 import process from 'node:process';
 import { sendNotice } from '../operations';
+import { withProgress } from '../progress';
 import { muted, ui } from '../ui';
 import { UsageError } from './usage';
 
@@ -68,7 +69,14 @@ export async function run(
       ? `Exit code ${outcome.code}${outcome.signal ? ` (${outcome.signal})` : ''} after ${elapsed}.`
       : `Finished in ${elapsed}.`;
   try {
-    const sent = await sendNotice(message, `${label} ${failed ? 'failed' : 'succeeded'}`);
+    const sent = await withProgress(
+      'Sending completion notice to GreatPing',
+      (signal) => sendNotice(message, `${label} ${failed ? 'failed' : 'succeeded'}`, signal),
+      {
+        interrupted:
+          'Completion notice interrupted. GreatPing may have accepted it; check the app.',
+      },
+    );
     if (sent.status === 'paused')
       ui.warn(`${label} ended; alerts from this computer are paused, so nobody was alerted.`);
   } catch (error) {

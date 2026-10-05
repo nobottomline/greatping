@@ -32,7 +32,7 @@ export async function ask(
   process.once('SIGINT', interrupt);
   process.once('SIGTERM', terminate);
   const started = Date.now();
-  let progress: ReturnType<typeof spinner> | undefined;
+  let progress = options.json ? undefined : spinner('Sending question to GreatPing');
   let ticker: ReturnType<typeof setInterval> | undefined;
   const stopProgress = () => {
     clearInterval(ticker);
@@ -43,6 +43,7 @@ export async function ask(
       signal: controller.signal,
       allowText: options.allowText === true,
       onCreated(request) {
+        progress?.stop();
         warnIfPaused(request);
         if (options.json) return;
         progress = spinner('Waiting for your answer in GreatPing');
@@ -112,7 +113,7 @@ export async function notify(
   }
   if (options.json) process.stdout.write(`${JSON.stringify(result)}\n`);
   if (result.status === 'paused') warnIfPaused({ paused: true });
-  else ui.success('GreatPing accepted the notice.');
+  else ui.success('Notification queued.');
   return 0;
 }
 

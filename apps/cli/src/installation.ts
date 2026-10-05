@@ -211,7 +211,11 @@ export function detectInstallation(
 }
 
 /** Read-only package-manager probe, bounded and without arbitrary log output. */
-export async function verifyRemoval(installation: Installation): Promise<void> {
+export async function verifyRemoval(
+  installation: Installation,
+  signal?: AbortSignal,
+): Promise<void> {
+  signal?.throwIfAborted();
   const removal = installation.removal;
   if (!removal || !installation.root)
     throw new Error(
@@ -226,7 +230,7 @@ export async function verifyRemoval(installation: Installation): Promise<void> {
   )
     throw new Error('The GreatPing installation changed. Run uninstall again.');
   if (installation.manager === 'vite-plus') return;
-  const output = await managerOutput(removal.executable, removal.probe, 3000);
+  const output = await managerOutput(removal.executable, removal.probe, 3000, signal);
   const actual =
     installation.manager === 'pnpm' || installation.manager === 'bun'
       ? join(output, 'greatping')
@@ -241,6 +245,7 @@ export function managerOutput(
   executable: string,
   args: string[],
   timeoutMs = 30000,
+  signal?: AbortSignal,
 ): Promise<string> {
   return new Promise((resolveOutput, reject) => {
     const batch = process.platform === 'win32' && /\.(cmd|bat)$/i.test(executable);
@@ -258,6 +263,7 @@ export function managerOutput(
       {
         stdio: ['ignore', 'pipe', 'pipe'],
         shell: batch,
+        ...(signal ? { signal } : {}),
       },
     );
     let output = '';

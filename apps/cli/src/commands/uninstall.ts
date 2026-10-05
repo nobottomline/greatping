@@ -12,6 +12,7 @@ import {
   type RemovalAction,
   removeEmptyDirectory,
 } from '../integrations/removal';
+import { CommandInterrupted, withProgress } from '../progress';
 import { confirm, interactive, print, ui } from '../ui';
 import { UsageError } from './usage';
 
@@ -24,6 +25,7 @@ interface UninstallOptions {
 
 export async function uninstall(options: UninstallOptions): Promise<number> {
   const config = loadConfig();
+  let removalSignal: AbortSignal | undefined;
   let pairingUnknown = false;
   if (existsSync(configPath())) {
     try {
@@ -46,7 +48,11 @@ export async function uninstall(options: UninstallOptions): Promise<number> {
             label: 'Unpair this computer and revoke its server credential',
             run: async () => {
               try {
-                await api(config, 'DELETE', '/machine/me', { signal: AbortSignal.timeout(5000) });
+                await api(config, 'DELETE', '/machine/me', {
+                  signal: removalSignal
+                    ? AbortSignal.any([removalSignal, AbortSignal.timeout(5000)])
+                    : AbortSignal.timeout(5000),
+                });
               } catch (error) {
                 if (!(error instanceof ApiError && error.status === 401)) throw error;
               }
@@ -100,10 +106,10 @@ export async function uninstall(options: UninstallOptions): Promise<number> {
             ? { problem: 'The original package manager is unavailable.' }
             : {}),
           run: async () => {
-            await verifyRemoval(installation);
+            await verifyRemoval(installation, removalSignal);
             const removal = installation.removal;
             if (!removal) throw new Error('The original package manager is unavailable.');
-            await managerOutput(removal.executable, removal.args);
+            await managerOutput(removal.executable, removal.args, 30000, removalSignal);
             if (existsSync(root)) throw new Error('The package manager left the CLI installed.');
           },
         },
@@ -142,8 +148,16 @@ export async function uninstall(options: UninstallOptions): Promise<number> {
   // Check the owner before revoking a credential or touching integrations.
   if (root) {
     try {
-      await verifyRemoval(installation);
+      await withProgress(
+        'Checking package ownership',
+        (signal) => verifyRemoval(installation, signal),
+        {
+          json: options.json,
+          interrupted: 'Ownership check interrupted. No removal was started.',
+        },
+      );
     } catch (error) {
+      if (error instanceof CommandInterrupted) throw error;
       const message =
         error instanceof Error ? error.message : 'Could not verify the package manager.';
       ui.error(message);
@@ -159,30 +173,41 @@ export async function uninstall(options: UninstallOptions): Promise<number> {
       return 1;
     }
   }
-  const results = await executeRemoval([...actions, ...pairing, ...backups]);
-  if (results.every((r) => r.status === 'removed')) {
-    results.push(
-      ...(await executeRemoval(local.filter((action) => action.id !== 'local:installation.json'))),
-    );
-    if (results.every((r) => r.status === 'removed'))
-      results.push(...(await executeRemoval(binary)));
-    if (results.every((r) => r.status === 'removed')) {
-      results.push(
-        ...(await executeRemoval(
-          local.filter((action) => action.id === 'local:installation.json'),
-        )),
-      );
-      results.push(
-        ...(await executeRemoval([
-          {
-            id: 'local:directory',
-            label: 'Remove the empty GreatPing config directory',
-            run: () => removeEmptyDirectory(dir),
-          },
-        ])),
-      );
-    }
-  }
+  const results = await withProgress(
+    'Removing GreatPing',
+    async (signal, update) => {
+      removalSignal = signal;
+      const remove = (actions: RemovalAction[]) =>
+        executeRemoval(actions, { signal, onAction: update });
+      const results = await remove([...actions, ...pairing, ...backups]);
+      if (results.every((r) => r.status === 'removed')) {
+        results.push(
+          ...(await remove(local.filter((action) => action.id !== 'local:installation.json'))),
+        );
+        if (results.every((r) => r.status === 'removed')) results.push(...(await remove(binary)));
+        if (results.every((r) => r.status === 'removed')) {
+          results.push(
+            ...(await remove(local.filter((action) => action.id === 'local:installation.json'))),
+          );
+          results.push(
+            ...(await remove([
+              {
+                id: 'local:directory',
+                label: 'Remove the empty GreatPing config directory',
+                run: () => removeEmptyDirectory(dir),
+              },
+            ])),
+          );
+        }
+      }
+      return results;
+    },
+    {
+      json: options.json,
+      interrupted:
+        'Removal interrupted. Some changes may already be applied; rerun greatping uninstall to finish.',
+    },
+  );
   for (const result of results) {
     if (result.status === 'failed') ui.error(result.label, result.error);
     else ui.success(result.label);

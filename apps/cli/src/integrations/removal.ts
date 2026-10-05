@@ -142,13 +142,20 @@ export function integrationRemoval(ids: HostId[], full = false): RemovalAction[]
   return actions;
 }
 
-export async function executeRemoval(actions: RemovalAction[]): Promise<RemovalOutcome[]> {
+export async function executeRemoval(
+  actions: RemovalAction[],
+  options: { signal?: AbortSignal; onAction?: (label: string) => void } = {},
+): Promise<RemovalOutcome[]> {
   const results: RemovalOutcome[] = [];
   for (const action of actions) {
+    options.signal?.throwIfAborted();
+    options.onAction?.(action.label);
     try {
       await action.run();
+      options.signal?.throwIfAborted();
       results.push({ id: action.id, label: action.label, status: 'removed' });
     } catch (error) {
+      options.signal?.throwIfAborted();
       results.push({
         id: action.id,
         label: action.label,

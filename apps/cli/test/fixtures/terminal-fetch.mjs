@@ -13,7 +13,47 @@ globalThis.fetch = async (url, options = {}) => {
   }
   if (parsed.origin !== 'https://greatping-api-dev.ueldo343.workers.dev')
     throw new Error('Unexpected hosted request');
+  const activity = process.env.GREATPING_TEST_ACTIVITY;
+  if (activity) {
+    await delay(
+      activity === 'hang' ||
+        (activity === 'poll-hang' && parsed.pathname.startsWith('/v1/push-tests/'))
+        ? 10000
+        : 700,
+      undefined,
+      { signal: options.signal },
+    );
+    if (activity === 'network') throw new Error('Fixture network failure');
+    if (activity === 'error')
+      return Response.json({ error: { code: 'unauthorized' } }, { status: 401 });
+  }
+  if (parsed.pathname === '/v1/machine/me/pause')
+    return Response.json({ alertsPausedUntil: JSON.parse(options.body).until });
+  if (parsed.pathname === '/v1/machine/me/test' || parsed.pathname.startsWith('/v1/push-tests/'))
+    return Response.json({
+      id: 'terminal-push-test',
+      pending: activity === 'poll-hang',
+      devices: [{ name: 'Test phone', platform: 'ios', mode: 'first', status: 'accepted' }],
+    });
+  if (parsed.pathname === '/v1/machine/me/project-labels' && options.method === 'PUT')
+    return Response.json({ projectLabels: JSON.parse(options.body).mode });
   if (parsed.pathname === '/v1/machine/me') {
+    if (options.method === 'DELETE') return new Response(null, { status: 204 });
+    const statusMode = process.env.GREATPING_TEST_STATUS;
+    if (statusMode) {
+      const wait =
+        statusMode === 'hang'
+          ? 10000
+          : statusMode === 'report-slow'
+            ? options.method === 'PATCH'
+              ? 1200
+              : 0
+            : 700;
+      await delay(wait, undefined, { signal: options.signal });
+      if (statusMode === 'network') throw new Error('Fixture network failure');
+      if (statusMode === 'revoked')
+        return Response.json({ error: { code: 'unauthorized' } }, { status: 401 });
+    }
     if (process.env.GREATPING_TEST_MODE === 'network') throw new Error('Fixture network failure');
     if (options.method === 'PATCH') return Response.json({});
     return Response.json({

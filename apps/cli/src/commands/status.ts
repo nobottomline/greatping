@@ -6,7 +6,7 @@ import { HOST_IDS, hostIntegrations, inspectHost } from '../integrations';
 import { HOSTS } from '../integrations/host-hooks';
 import { readMachine } from '../operations';
 import { reportMachine } from '../report';
-import { color, command, muted, print, ui } from '../ui';
+import { color, command, muted, print, spinner, ui } from '../ui';
 import { hostSummary } from './setup';
 
 export async function status(options: { json?: boolean }): Promise<number> {
@@ -35,19 +35,46 @@ export async function status(options: { json?: boolean }): Promise<number> {
     return 1;
   }
 
-  const reported = reportMachine(config);
+  const controller = new AbortController();
+  let exitCode = 0;
+  const interrupt = () => {
+    exitCode = 130;
+    controller.abort();
+  };
+  const terminate = () => {
+    exitCode = 143;
+    controller.abort();
+  };
+  process.once('SIGINT', interrupt);
+  process.once('SIGTERM', terminate);
+  const progress = options.json ? undefined : spinner('Checking status in GreatPing');
   let me: MachineMeResponse | null = null;
   let problem: string | null = null;
+  let revoked = false;
   try {
-    me = await readMachine(config);
-  } catch (error) {
-    problem = error instanceof Error ? error.message : 'Could not check the pairing.';
-    if (error instanceof ApiError && error.status === 401 && options.json) {
-      process.stdout.write(
-        `${JSON.stringify({ paired: false, revoked: true, server: config.apiUrl })}\n`,
-      );
-      return 1;
+    const reported = reportMachine(config, controller.signal);
+    try {
+      me = await readMachine(config, controller.signal);
+    } catch (error) {
+      problem = error instanceof Error ? error.message : 'Could not check the pairing.';
+      revoked = error instanceof ApiError && error.status === 401;
     }
+    await reported;
+  } finally {
+    progress?.stop();
+    process.off('SIGINT', interrupt);
+    process.off('SIGTERM', terminate);
+  }
+
+  if (exitCode) {
+    if (!options.json) ui.warn('Status check interrupted.');
+    return exitCode;
+  }
+  if (revoked && options.json) {
+    process.stdout.write(
+      `${JSON.stringify({ paired: false, revoked: true, server: config.apiUrl })}\n`,
+    );
+    return 1;
   }
 
   if (options.json) {
@@ -67,7 +94,6 @@ export async function status(options: { json?: boolean }): Promise<number> {
     return problem ? 1 : 0;
   }
 
-  await reported;
   ui.heading('Status');
   const label = { first: 'alerted first', standard: '', backup: 'reminders only', off: 'off' };
   const devices = me

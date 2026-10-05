@@ -10,7 +10,8 @@ import { currentLauncher } from '../integrations/launcher';
 import { registerCodexMcp } from '../integrations/mcp';
 import { AWAY_AFTER_SEC, idleSeconds } from '../integrations/presence';
 import { PROBE_EVENT } from '../integrations/runner';
-import { reportMachine } from '../report';
+import { CommandInterrupted, withProgress } from '../progress';
+import { reportMachineWithProgress } from '../report';
 import { color, command, muted, print, ui } from '../ui';
 
 type Check = [label: string, value: string];
@@ -140,9 +141,11 @@ export async function doctor(options: { fix: boolean; verbose?: boolean }): Prom
     general.push(['Pairing', bad(`not paired ${muted(`— ${command('greatping login')}`)}`)]);
   } else {
     try {
-      const me = await api<MachineMeResponse>(config, 'GET', '/machine/me', {
-        signal: AbortSignal.timeout(8000),
-      });
+      const me = await withProgress('Checking pairing with GreatPing', (signal) =>
+        api<MachineMeResponse>(config, 'GET', '/machine/me', {
+          signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
+        }),
+      );
       general.push(['Pairing', ok(me.machine.name)]);
       general.push([
         'Devices',
@@ -168,6 +171,7 @@ export async function doctor(options: { fix: boolean; verbose?: boolean }): Prom
             ),
       ]);
     } catch (error) {
+      if (error instanceof CommandInterrupted) throw error;
       problems.push('could not check pairing with GreatPing');
       general.push(['Pairing', bad(error instanceof Error ? error.message : String(error))]);
     }
@@ -194,7 +198,7 @@ export async function doctor(options: { fix: boolean; verbose?: boolean }): Prom
     print();
     ui.info('Neither Claude Code nor Codex was found for this user.');
   }
-  await reportMachine(config);
+  await reportMachineWithProgress(config);
   print();
   if (problems.length > 0) {
     ui.error(

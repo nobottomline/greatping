@@ -124,9 +124,40 @@ Alerts say who waits and why, never what about: the hook sends the agent, the re
 
 ### Project labels
 
+`greatping project` lists the available actions and the cached computer-wide
+setting. Use `greatping project show` for the current project's label, or
+`greatping project --help` for command descriptions. `greatping project --json`
+keeps the same settings output as `greatping project show --json` for scripts.
+
 Alerts can name the project an agent works in: "Codex · billing-api". The label is the folder name of the git repository (or worktree) root, or a name you choose; never a path. Labels are off until you turn them on in the `setup` picker (**Projects › Show project folder names**), with `greatping project labels folder`, or on the computer's screen in the app; `hidden` turns them off and the server then drops any label. Per project, from its directory: `greatping project name "Client A"` sends that name instead (for a folder under NDA, two clones with the same name, or a generic `app` folder), `greatping project hide` sends none, `greatping project reset` returns to the computer's setting and `greatping project list` shows the overrides. Overrides and the cached mode live in `alerts.json` next to the config, with the secret that keys the opaque ids. A device can also keep project names off its Lock Screen (Settings › Project Names); the app always shows them. Labels are deleted with the alert's text 7 days after it finishes.
 
 `greatping doctor` runs each installed hook with a test event and reports broken, outdated (from an older CLI or tied to one Node version) or never-run hooks; `--fix` repairs them.
+
+### Advanced hook management
+
+Use `greatping setup` for normal agent configuration. `greatping hooks` is a
+supported advanced command for scripts and for changing hooks independently of
+MCP tools and skills:
+
+```sh
+greatping hooks status
+greatping hooks install claude --finished
+greatping hooks uninstall codex
+greatping hooks --help
+```
+
+Without an action, it shows the current integration status. Omit the agent to
+install or remove hooks for all detected agents. `--finished` and `--no-finished`
+control Claude Code's turn-end alerts; Codex hooks include turn-end alerts.
+Removing hooks preserves pairing, MCP tools, skills and unrelated agent hooks.
+Use `greatping doctor` to test the installed handlers and `doctor --fix` to repair
+outdated launchers. `greatping hook` (singular) is an internal event handler called
+by agents, not a command to run manually.
+
+Hooks remain the event mechanism for Claude Code and Codex. Planned native
+plugins will package that mechanism with MCP and the skill, with migration to
+one active integration owner per agent; they do not replace automatic events
+with model-directed tool calls. See **Future integration packages** below.
 
 ## MCP tools
 
@@ -147,9 +178,10 @@ errors return `isError: true` and `{status: "error", code, message}`. Invalid in
 is rejected by MCP before the operation runs. The tools declare read-only and
 idempotency annotations; those are client hints, not authorization.
 
-`accepted` confirms server acceptance, not phone delivery. `paused` means the
-request is listed in the app without a push. Questions distinguish `answered`,
-`expired`, `cancelled` and `resolved`. Cancelling a running question withdraws it
+CLI and MCP `notify` report `Notification queued.` when alerts are active. The JSON status stays
+`accepted`: GreatPing queued the notification, without confirming device delivery.
+`paused` means the request is listed in the app without a push. Questions distinguish
+`answered`, `expired`, `cancelled` and `resolved`. Cancelling a running question withdraws it
 when its ID is available; failed withdrawal is an error, never a claim of success.
 The WebSocket is closed and the polling loop stops on cancellation.
 

@@ -3,6 +3,29 @@
 Source synchronization and npm publication are separate. Entries under
 Unreleased are not available merely by installing npm `latest`.
 
+## Unreleased
+
+## 0.3.3 — 2026-10-05
+
+- Make advanced hook management discoverable from CLI help, describe its actions
+  and document how hooks relate to setup, diagnostics and planned native plugins.
+- Show activity while pausing/resuming alerts, updating project labels, pairing,
+  checking diagnostics, syncing setup and removing components. Cover question
+  creation and completion notices too; keep automation output free of progress.
+- Cancel pending requests and push-test polling on interruption, restore the
+  cursor and preserve pairing/recovery state when cleanup has not completed.
+- Use consistent project headings, colored names and commands, and muted paths
+  and hidden states across project actions. Preserve plain and JSON output.
+- Report `Notification queued.` for CLI and MCP notification success. Clarify
+  in the MCP tool description that queueing does not confirm device delivery;
+  retain the JSON `accepted` status for compatibility.
+- Make `greatping project` an overview of available commands and the cached
+  computer setting. Keep `project show` focused on the current project and
+  preserve the existing default JSON output. List every action in `--help`.
+- Show status-check progress immediately in interactive terminals; clear it
+  before results, errors or interruption. Cancel both the status lookup and
+  description refresh on Ctrl+C without adding progress to JSON or piped output.
+
 ## 0.3.2 — 2026-10-04
 
 - Apply project-name visibility changes made on a device from the computer's

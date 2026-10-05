@@ -2,7 +2,7 @@ import { loadConfig } from '../config';
 import { HOST_IDS, inspectHost } from '../integrations';
 import { HOSTS, installHooks, uninstallHooks } from '../integrations/host-hooks';
 import { currentLauncher } from '../integrations/launcher';
-import { reportMachine } from '../report';
+import { reportMachineWithProgress } from '../report';
 import { muted, print, ui } from '../ui';
 import { hostSummary, parseHost } from './setup';
 import { UsageError } from './usage';
@@ -43,7 +43,7 @@ export async function hooks(
       ui.next(muted(host.activation));
     }
     ui.next(muted('Alerts are generic; question text and commands stay on this computer.'));
-    await reportMachine(loadConfig());
+    await reportMachineWithProgress(loadConfig());
     return 0;
   }
   if (action === 'uninstall') {
@@ -52,7 +52,7 @@ export async function hooks(
       if (uninstallHooks(host)) ui.success(`Removed the GreatPing hooks from ${host.name}.`);
       else ui.info(`No GreatPing hooks were installed in ${host.name}.`);
     }
-    await reportMachine(loadConfig());
+    await reportMachineWithProgress(loadConfig());
     return 0;
   }
   throw new UsageError('hooks', `Unknown action "${action}". Use install, uninstall or status.`);

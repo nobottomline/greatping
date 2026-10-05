@@ -1,4 +1,5 @@
 import process from 'node:process';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   buildPairDeepLink,
   type PairPollResponse,
@@ -16,8 +17,9 @@ import { type Config, isPaired, loadConfig, requireServer, saveConfig } from '..
 import { HOST_IDS, inspectHost } from '../integrations';
 import { newMachineKeys, randomBytes, verifyPairing } from '../keys';
 import { computerName, machinePlatform } from '../machine';
+import { withProgress } from '../progress';
 import { renderQr } from '../qr';
-import { currentDescription, reportMachine } from '../report';
+import { currentDescription, reportMachineWithProgress } from '../report';
 import {
   color,
   colorEnabled,
@@ -27,7 +29,6 @@ import {
   interactive,
   muted,
   print,
-  spinner,
   strong,
   ui,
 } from '../ui';
@@ -59,17 +60,23 @@ export async function login(options: { name?: string }): Promise<number> {
     keys: keys.public,
     random: randomBytes,
   });
-  const start = await api<PairStartResponse>(config, 'POST', '/pair/start', {
-    token: null,
-    body: {
-      machineName: name,
-      platform: machinePlatform(),
-      ...currentDescription(),
-      keys: keys.public,
-      session,
-      share: state.share,
-    },
-  });
+  const start = await withProgress(
+    'Creating a pairing code in GreatPing',
+    (signal) =>
+      api<PairStartResponse>(config, 'POST', '/pair/start', {
+        token: null,
+        body: {
+          machineName: name,
+          platform: machinePlatform(),
+          ...currentDescription(),
+          keys: keys.public,
+          session,
+          share: state.share,
+        },
+        signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
+      }),
+    { interrupted: 'Pairing-code request interrupted. Run greatping login to start again.' },
+  );
   const code = joinUserCode(start.lookup, secret);
 
   ui.heading('Pair this computer');
@@ -84,10 +91,6 @@ export async function login(options: { name?: string }): Promise<number> {
   if (result === 'expired') {
     ui.error('The pairing code expired.', `Run ${command('greatping login')} to get a new one.`);
     return 2;
-  }
-  if (result === 'cancelled') {
-    ui.warn('Pairing cancelled.');
-    return 130;
   }
 
   const paired: Config = {
@@ -119,14 +122,22 @@ export async function login(options: { name?: string }): Promise<number> {
   Object.assign(config, paired, { keys: keys.secret, manifest: verified.manifest });
   saveConfig(config);
   // The phone checks this tag to trust the computer's keys in turn.
-  await api(config, 'POST', '/machine/me/ceremony', {
-    body: { tag: verified.tag },
-    signal: AbortSignal.timeout(5000),
-  }).catch(() => {});
+  await withProgress(
+    'Confirming pairing with GreatPing',
+    (signal) =>
+      api(config, 'POST', '/machine/me/ceremony', {
+        body: { tag: verified.tag },
+        signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
+      }).catch(() => {}),
+    {
+      interrupted:
+        'Pairing confirmation interrupted. Pairing was saved locally; run greatping status.',
+    },
+  );
   const devices = result.deviceCount === 1 ? 'your device' : `your ${result.deviceCount} devices`;
   ui.success(`Paired ${strong(name)}. Alerts now reach ${devices}.`);
 
-  await reportMachine(config);
+  await reportMachineWithProgress(config);
   const setupResult = await offerSetup();
   if (setupResult !== 0) return setupResult;
   ui.next(`Try it: ${command('greatping notify "Hello from my computer"')}`);
@@ -134,44 +145,44 @@ export async function login(options: { name?: string }): Promise<number> {
   return 0;
 }
 
-type Approval = Extract<PairPollResponse, { status: 'approved' }> | 'expired' | 'cancelled';
+type Approval = Extract<PairPollResponse, { status: 'approved' }> | 'expired';
 
 async function waitForApproval(config: Config, start: PairStartResponse): Promise<Approval> {
-  const progress = spinner(
-    `Waiting for approval ${muted(`· expires in ${countdown(start.expiresAt)}`)}`,
-  );
-  const ticker = setInterval(
-    () =>
-      progress.update(
-        `Waiting for approval ${muted(`· expires in ${countdown(start.expiresAt)}`)}`,
-      ),
-    1000,
-  );
-  let cancelled = false;
-  const onInterrupt = () => {
-    cancelled = true;
-  };
-  process.once('SIGINT', onInterrupt);
-  try {
-    while (!cancelled && Date.now() < start.expiresAt) {
-      await sleep(start.pollIntervalSec * 1000, () => cancelled);
-      if (cancelled) break;
+  const label = () => `Waiting for approval ${muted(`· expires in ${countdown(start.expiresAt)}`)}`;
+  return withProgress(
+    label(),
+    async (signal, update): Promise<Approval> => {
+      const ticker = setInterval(() => update(label()), 1000);
       try {
-        const poll = await api<PairPollResponse>(config, 'GET', `/pair/${start.pairingId}`, {
-          token: start.pollSecret,
-        });
-        if (poll.status === 'approved') return poll;
-        if (poll.status === 'expired') return 'expired';
-      } catch {
-        // Transient network trouble: keep polling until the code expires.
+        while (Date.now() < start.expiresAt) {
+          await delay(
+            Math.min(start.pollIntervalSec * 1000, start.expiresAt - Date.now()),
+            undefined,
+            { signal },
+          );
+          if (Date.now() >= start.expiresAt) break;
+          try {
+            const poll = await api<PairPollResponse>(config, 'GET', `/pair/${start.pairingId}`, {
+              token: start.pollSecret,
+              signal: AbortSignal.any([
+                signal,
+                AbortSignal.timeout(Math.max(1, Math.min(8000, start.expiresAt - Date.now()))),
+              ]),
+            });
+            if (poll.status === 'approved') return poll;
+            if (poll.status === 'expired') return 'expired';
+          } catch {
+            signal.throwIfAborted();
+            // Transient network trouble: keep polling until the code expires.
+          }
+        }
+        return 'expired';
+      } finally {
+        clearInterval(ticker);
       }
-    }
-    return cancelled ? 'cancelled' : 'expired';
-  } finally {
-    clearInterval(ticker);
-    progress.stop();
-    process.off('SIGINT', onInterrupt);
-  }
+    },
+    { interrupted: 'Pairing cancelled.' },
+  );
 }
 
 /** Offers to set up agents that are here but not alerting yet. */
@@ -202,25 +213,26 @@ export async function logout(options: { yes?: boolean }): Promise<number> {
     ui.info('Still paired.');
     return process.exitCode === 130 ? 130 : 0;
   }
-  try {
-    await api(config, 'DELETE', '/machine/me', { signal: AbortSignal.timeout(5000) });
-  } catch {
-    // The local credential is removed either way; the server copy is revoked
-    // when reachable, or can be removed in the app.
-  }
-  saveConfig({ apiUrl: config.apiUrl });
+  await withProgress(
+    'Unpairing this computer from GreatPing',
+    async (signal) => {
+      try {
+        await api(config, 'DELETE', '/machine/me', {
+          signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
+        });
+      } catch {
+        // The local credential is removed either way; the server copy is revoked
+        // when reachable, or can be removed in the app.
+      }
+      // Cancellation keeps the local credential for a safe retry.
+      signal.throwIfAborted();
+      saveConfig({ apiUrl: config.apiUrl });
+    },
+    {
+      interrupted:
+        'Unpairing interrupted. The local pairing was kept; run greatping status or retry logout.',
+    },
+  );
   ui.success('Unpaired. This computer no longer sends alerts.');
   return 0;
-}
-
-function sleep(ms: number, stop: () => boolean): Promise<void> {
-  return new Promise((resolve) => {
-    const started = Date.now();
-    const timer = setInterval(() => {
-      if (stop() || Date.now() - started >= ms) {
-        clearInterval(timer);
-        resolve();
-      }
-    }, 100);
-  });
 }

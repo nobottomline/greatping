@@ -71,13 +71,15 @@ export type ManifestState =
  * must verify against the one before. Saves the newest verified version.
  * Best effort; a network failure keeps the pinned one.
  */
-export async function followManifest(config: Config): Promise<ManifestState> {
+export async function followManifest(config: Config, signal?: AbortSignal): Promise<ManifestState> {
   if (!isPaired(config) || !config.manifest) return { status: 'none' };
   const pinned = config.manifest;
   let newer: Manifest[];
   try {
     const res = await api<ManifestsResponse>(config, 'GET', `/manifests?after=${pinned.version}`, {
-      signal: AbortSignal.timeout(3000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(3000)])
+        : AbortSignal.timeout(3000),
     });
     newer = res.manifests as Manifest[];
   } catch {

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { loadConfig } from '../config';
-import { reportMachine } from '../report';
+import { reportMachineWithProgress } from '../report';
 import { pickSetup } from '../setup-picker';
 import { command, muted, print, ui } from '../ui';
 import { recordManagedSkill, SKILLS_RUNNER } from './managed-skills';
@@ -80,6 +80,6 @@ export async function setupSkills(only: HostId | null): Promise<number> {
   }
   // Reconcile even after a partial install or cancellation.
   recordManagedSkill();
-  await reportMachine(loadConfig());
+  await reportMachineWithProgress(loadConfig());
   return code;
 }

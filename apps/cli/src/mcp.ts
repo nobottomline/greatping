@@ -59,7 +59,7 @@ export function createMcpServer(): McpServer {
     'notify',
     {
       description:
-        'Send a requested alert to the paired devices. Omit message for a generic attention alert. Does not answer or approve native host prompts. Do not duplicate installed automatic hooks.',
+        'Send a requested alert to the paired devices. Success means GreatPing queued the notification; it does not confirm device delivery. Omit message for a generic attention alert. Does not answer or approve native host prompts. Do not duplicate installed automatic hooks.',
       inputSchema: z.object({
         message: z.string().trim().min(1).max(LIMITS.bodyMaxLength).optional(),
         title: z.string().trim().min(1).max(100).optional(),
@@ -82,7 +82,7 @@ export function createMcpServer(): McpServer {
           { ...value },
           value.status === 'paused'
             ? 'The notice is in the app, but alerts from this computer are paused.'
-            : 'GreatPing accepted the notice. Delivery to a device is not yet confirmed.',
+            : 'Notification queued.',
         );
       } catch (error) {
         return failure(error);

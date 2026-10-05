@@ -3,7 +3,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { PushTestDevice, PushTestResponse } from '@greatping/protocol';
 import { api } from '../api';
 import { isPaired, loadConfig } from '../config';
-import { color, muted, print, spinner, ui } from '../ui';
+import { withProgress } from '../progress';
+import { color, muted, print, ui } from '../ui';
 import { UsageError } from './usage';
 
 /** How long to wait for Apple's and Google's answers before reporting what is known. */
@@ -61,23 +62,27 @@ export async function test(options: { json?: boolean }): Promise<number> {
   const config = loadConfig();
   if (!isPaired(config))
     throw new UsageError(null, 'This computer is not paired.', 'Run greatping login first.');
-  const progress = options.json ? null : spinner('Sending a test notification');
-  let result: PushTestResponse;
-  try {
-    result = await api<PushTestResponse>(config, 'POST', '/machine/me/test', {
-      signal: AbortSignal.timeout(15_000),
-    });
-    const deadline = Date.now() + WAIT_MS;
-    while (result.pending && Date.now() < deadline) {
-      progress?.update(`Waiting for Apple and Google ${muted('· up to 30 s')}`);
-      await delay(POLL_MS);
-      result = await api<PushTestResponse>(config, 'GET', `/push-tests/${result.id}`, {
-        signal: AbortSignal.timeout(10_000),
+  const result = await withProgress(
+    'Sending a test notification',
+    async (signal, update) => {
+      let result = await api<PushTestResponse>(config, 'POST', '/machine/me/test', {
+        signal: AbortSignal.any([signal, AbortSignal.timeout(15_000)]),
       });
-    }
-  } finally {
-    progress?.stop();
-  }
+      const deadline = Date.now() + WAIT_MS;
+      while (result.pending && Date.now() < deadline) {
+        update(`Waiting for Apple and Google ${muted('· up to 30 s')}`);
+        await delay(POLL_MS, undefined, { signal });
+        result = await api<PushTestResponse>(config, 'GET', `/push-tests/${result.id}`, {
+          signal: AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+        });
+      }
+      return result;
+    },
+    {
+      json: Boolean(options.json),
+      interrupted: 'Test interrupted. A notification may already have been sent; check the app.',
+    },
+  );
   const reached = result.devices.some((device) => device.status === 'accepted');
   if (options.json) {
     process.stdout.write(`${JSON.stringify(result)}\n`);

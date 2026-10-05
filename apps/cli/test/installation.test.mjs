@@ -13,8 +13,56 @@ import {
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import test from 'node:test';
-import { detectInstallation, verifyRemoval } from '../src/installation.ts';
+import { setTimeout as delay } from 'node:timers/promises';
+import { detectInstallation, managerOutput, verifyRemoval } from '../src/installation.ts';
 import { currentLauncher } from '../src/integrations/launcher.ts';
+import { executeRemoval } from '../src/integrations/removal.ts';
+
+test('cancellation stops a package-manager subprocess and skips remaining cleanup', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'greatping-removal-cancel-'));
+  try {
+    const ready = join(root, 'ready');
+    const controller = new AbortController();
+    const pending = managerOutput(
+      process.execPath,
+      [
+        '-e',
+        `require('node:fs').writeFileSync(${JSON.stringify(ready)}, 'ready');setInterval(()=>{},1000)`,
+      ],
+      10000,
+      controller.signal,
+    );
+    const outcome = assert.rejects(pending);
+    const deadline = Date.now() + 5000;
+    while (!existsSync(ready) && Date.now() < deadline) await delay(10);
+    assert.ok(existsSync(ready), 'The manager never started');
+    const started = Date.now();
+    controller.abort();
+    await outcome;
+    assert.ok(Date.now() - started < 2000, 'Cancellation waited for the manager deadline');
+    const cleanup = new AbortController();
+    let discardedPairing = false;
+    await assert.rejects(
+      executeRemoval(
+        [
+          { id: 'first', label: 'first', run: () => cleanup.abort() },
+          {
+            id: 'pairing',
+            label: 'delete pairing',
+            run: () => {
+              discardedPairing = true;
+            },
+          },
+        ],
+        { signal: cleanup.signal },
+      ),
+      { name: 'AbortError' },
+    );
+    assert.equal(discardedPairing, false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 function json(path, value) {
   mkdirSync(dirname(path), { recursive: true });

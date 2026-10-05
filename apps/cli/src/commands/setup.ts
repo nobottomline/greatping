@@ -13,7 +13,8 @@ import { executeRemoval, integrationRemoval } from '../integrations/removal';
 import { installSkill } from '../integrations/skill';
 import { setupSkills } from '../integrations/skills-cli';
 import type { HostId } from '../integrations/state';
-import { reportMachine } from '../report';
+import { CommandInterrupted, withProgress } from '../progress';
+import { reportMachineWithProgress } from '../report';
 import { type PickerItem, pickSetup } from '../setup-picker';
 import { color, command, confirm, interactive, muted, print, ui } from '../ui';
 import { setProjectLabels } from './project';
@@ -276,12 +277,19 @@ export async function setup(target: string | undefined, options: SetupOptions): 
         );
       if (!(await confirm('Remove these?', false))) return Number(process.exitCode ?? 0);
     }
-    const results = await executeRemoval(changes);
+    const results = await withProgress(
+      'Removing agent setup',
+      (signal, update) => executeRemoval(changes, { signal, onAction: update }),
+      {
+        interrupted:
+          'Setup removal interrupted. Some changes may already be applied; run greatping doctor.',
+      },
+    );
     for (const result of results) {
       if (result.status === 'failed') ui.error(result.label, result.error);
       else ui.success(result.label);
     }
-    await reportMachine(loadConfig());
+    await reportMachineWithProgress(loadConfig());
     return results.some((result) => result.status === 'failed') ? 1 : 0;
   }
   const ids = only ? [only] : HOST_IDS.filter((id) => inspectHost(id).detected || options.remove);
@@ -299,7 +307,7 @@ export async function setup(target: string | undefined, options: SetupOptions): 
     selections = new Map(ids.map((id) => [id, initialSelection(id, options)]));
     // Project labels are a setting of the paired computer; read it fresh first.
     const paired = isPaired(loadConfig());
-    if (paired) await reportMachine(loadConfig());
+    if (paired) await reportMachineWithProgress(loadConfig());
     const labels = cachedProjectLabels();
     const selected = await pickSetup([
       ...pickerItems(ids, selections),
@@ -318,8 +326,16 @@ export async function setup(target: string | undefined, options: SetupOptions): 
     const wanted = selected.has(PROJECT_ITEM) ? 'folder' : 'hidden';
     if (paired && wanted !== labels) {
       try {
-        await setProjectLabels(wanted);
+        await withProgress(
+          'Updating project labels in GreatPing',
+          (signal) => setProjectLabels(wanted, signal),
+          {
+            interrupted:
+              'Project-label update interrupted. GreatPing may have applied the change; run greatping status.',
+          },
+        );
       } catch (error) {
+        if (error instanceof CommandInterrupted) throw error;
         ui.error(
           'Project labels were not changed',
           error instanceof Error ? error.message : String(error),
@@ -358,8 +374,12 @@ export async function setup(target: string | undefined, options: SetupOptions): 
   for (const change of changes) {
     let problem: string | null;
     try {
-      problem = change.apply();
+      problem = await withProgress(change.label, async () => change.apply(), {
+        interrupted:
+          'Setup interrupted. Some changes may already be applied; run greatping doctor.',
+      });
     } catch (error) {
+      if (error instanceof CommandInterrupted) throw error;
       problem = error instanceof Error ? error.message : String(error);
     }
     if (problem) {
@@ -368,7 +388,7 @@ export async function setup(target: string | undefined, options: SetupOptions): 
     } else if (!selections) ui.success(change.label);
   }
   const config = loadConfig();
-  await reportMachine(config);
+  await reportMachineWithProgress(config);
   if (selections) {
     if (!failed) {
       rememberSelections(selections);

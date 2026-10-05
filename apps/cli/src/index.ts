@@ -7,7 +7,7 @@ import { doctor } from './commands/doctor';
 import { hooks } from './commands/hooks';
 import { login, logout } from './commands/login';
 import { pause, resume } from './commands/pause';
-import { project } from './commands/project';
+import { PROJECT_ACTIONS, project } from './commands/project';
 import { run } from './commands/run';
 import { setup } from './commands/setup';
 import { status } from './commands/status';
@@ -17,6 +17,7 @@ import { UsageError } from './commands/usage';
 import { isPaired, loadConfig } from './config';
 import { runHook } from './integrations/runner';
 import { startMcp } from './mcp';
+import { CommandInterrupted } from './progress';
 import { color, command, muted, print, ui } from './ui';
 import { checkForUpdates, prepareUpdateNotice } from './updates';
 import { MIN_NODE_VERSION, supportsNodeVersion, VERSION } from './version';
@@ -27,6 +28,7 @@ interface Command {
   usage: string;
   summary: string;
   details?: string[];
+  actions?: Array<[action: string, description: string]>;
   options: Options;
   flags?: Array<[flag: string, description: string]>;
   hidden?: boolean;
@@ -151,14 +153,17 @@ const commands: Record<string, Command> = {
     usage: 'greatping project [show|labels <folder|hidden>|name <name>|hide|reset|list] [--json]',
     summary: 'Choose how alerts name the project they come from',
     details: [
+      'Without an action, lists available commands and the cached computer setting.',
       'Alerts can show the project an agent works in, e.g. "Codex · billing-api".',
       'The label is the folder name of the git repository, or a name you choose;',
       'nothing else about the project leaves this computer. Labels are hidden',
       'until you turn them on with greatping project labels folder.',
       'name, hide and reset apply to the project of the current directory.',
+      'show and list read local settings; run greatping status to refresh the computer mode.',
     ],
+    actions: PROJECT_ACTIONS,
     options: { json: { type: 'boolean' } },
-    flags: [['--json', 'Print machine-readable output (show, list)']],
+    flags: [['--json', 'Print machine-readable settings (default, show, list)']],
     run: (v, p) => project(p[0], p.slice(1), { json: Boolean(v.json) }),
   },
   setup: {
@@ -172,6 +177,7 @@ const commands: Record<string, Command> = {
       'then optionally install the GreatPing skill with npx skills to say',
       '"ping me when the deploy is done" or "no pings for an hour".',
       'Alerts are generic; nothing from a prompt leaves this computer.',
+      'For hook-only management, see greatping hooks --help.',
     ],
     options: {
       finished: { type: 'boolean' },
@@ -224,10 +230,23 @@ const commands: Record<string, Command> = {
   },
   hooks: {
     usage: 'greatping hooks <install|uninstall|status> [claude|codex] [--finished|--no-finished]',
-    summary: 'Install or remove only the agent hooks',
-    details: ['Usually you want greatping setup, which also adds the skill and tools.'],
+    summary: 'Manage agent hooks without changing MCP or skills',
+    details: [
+      'Advanced: usually use greatping setup to configure the complete integration.',
+      'With no action, show the current integration status. Removing hooks keeps',
+      'pairing, MCP tools and skills. Use greatping doctor to check that hooks run.',
+    ],
+    actions: [
+      ['status', 'Show the current integration status'],
+      ['install [claude|codex]', 'Install hooks for one agent or all detected agents'],
+      ['uninstall [claude|codex]', 'Remove only GreatPing hooks; preserve other hooks'],
+    ],
     hidden: true,
     options: { finished: { type: 'boolean' }, 'no-finished': { type: 'boolean' } },
+    flags: [
+      ['--finished', 'Claude Code: also alert when a turn finishes'],
+      ['--no-finished', 'Claude Code: stop alerting when a turn finishes'],
+    ],
     run: (v, p) =>
       hooks(
         p[0],
@@ -311,6 +330,8 @@ function printHelp(): void {
   print(`    ${command('-h, --help')}         Help for a command: greatping <command> --help`);
   print(`    ${command('-v, --version')}      Print the version`);
   print();
+  print(`  ${muted(`Hook-only management: ${command('greatping hooks --help')}.`)}`);
+  print();
   print(
     isPaired(loadConfig())
       ? `  ${muted(`Pairing saved on this computer. Check your devices with ${command('greatping status')}.`)}`
@@ -328,6 +349,13 @@ function printCommandHelp(name: string, c: Command): void {
     print();
     for (const line of c.details) print(`  ${muted(line)}`);
   }
+  if (c.actions) {
+    print();
+    print(`  ${color.bold('Commands')}`);
+    const width = Math.max(...c.actions.map(([action]) => action.length));
+    for (const [action, description] of c.actions)
+      print(`    ${command(`greatping ${name} ${action.padEnd(width)}`)}  ${description}`);
+  }
   const flags = [...(c.flags ?? [])];
   if (flags.length) {
     print();
@@ -337,7 +365,6 @@ function printCommandHelp(name: string, c: Command): void {
       print(`    ${command(flag.padEnd(width))}  ${description}`);
   }
   print();
-  void name;
 }
 
 async function main(argv: string[]): Promise<number> {
@@ -415,6 +442,11 @@ void main(argv)
     process.exitCode = code;
   })
   .catch((error: unknown) => {
+    if (error instanceof CommandInterrupted) {
+      if (!error.silent) ui.warn(error.message);
+      process.exitCode = error.exitCode;
+      return;
+    }
     if (error instanceof UsageError) {
       ui.error(error.message, error.hint);
       const usage = error.command ? commands[error.command]?.usage : undefined;

@@ -107,6 +107,132 @@ try:
             'NODE_OPTIONS': f'--import={ROOT / "test/fixtures/terminal-fetch.mjs"}',
             'NO_UPDATE_NOTIFIER': '1'}
 
+        actions = ['show', 'labels folder', 'labels hidden', 'name <name>', 'hide', 'reset', 'list']
+        for args in [['project'], ['project', '--help'], ['help', 'project']]:
+            result = subprocess.run([NODE, str(CLI), *args], env=env,
+                                    capture_output=True, timeout=5)
+            assert result.returncode == 0 and result.stdout == b'', result
+            text = result.stderr.decode()
+            assert all(f'greatping project {action}' in text for action in actions), text
+            assert '\x1b' not in text, text
+        assert not (config / 'alerts.json').exists(), 'Project overview changed settings'
+        t = Terminal(['project'], {key: value for key, value in env.items() if key != 'NO_COLOR'})
+        t.finish()
+        assert '\x1b[36m' in t.output and 'Computer labels (cached)' in t.output, t.output
+        t = Terminal(['project', 'show'], env); t.finish()
+        assert 'Commands' not in t.output and 'Alerts' in t.output, t.output
+        outputs = []
+        for args in [['project', '--json'], ['project', 'show', '--json']]:
+            result = subprocess.run([NODE, str(CLI), *args], env=env,
+                                    capture_output=True, timeout=5)
+            assert result.returncode == 0 and result.stderr == b'', result
+            outputs.append(json.loads(result.stdout))
+        assert outputs[0] == outputs[1] and outputs[0]['mode'] == 'hidden', outputs
+        print('PASS Project overview and help expose every action, keep show focused and preserve JSON')
+
+        project_config = root / 'project-settings/greatping'
+        project_config.mkdir(parents=True)
+        (project_config / 'config.json').write_bytes((config / 'config.json').read_bytes())
+        project_env = {**env, 'XDG_CONFIG_HOME': str(project_config.parent)}
+        color_env = {key: value for key, value in project_env.items() if key != 'NO_COLOR'}
+        for args in [['show'], ['list'], ['name', 'Client A'], ['labels', 'folder'],
+                     ['show'], ['list'], ['hide'], ['show'], ['list'], ['reset'], ['labels', 'hidden']]:
+            t = Terminal(['project', *args], color_env); t.finish()
+            assert '\x1b[1m' in t.output and '\x1b[2m' in t.output, t.output
+            if args[0] in ['name', 'labels', 'hide', 'reset']:
+                assert '\x1b[32m' in t.output, t.output
+            if args == ['show'] and 'Client A' in t.output:
+                assert '\x1b[36m"Client A"\x1b[39m' in t.output, t.output
+        for args in [['show'], ['list'], ['name', 'Client A'], ['hide'], ['reset'], ['labels', 'folder']]:
+            for plain_env, flags in [(project_env, []), (color_env, ['--no-color'])]:
+                t = Terminal(['project', *args, *flags], plain_env); t.finish()
+                assert re.search(r'\x1b\[[0-9;]*m', t.output) is None, t.output
+        for args in [[], ['show'], ['list']]:
+            t = Terminal(['project', *args, '--json'], color_env, split=True)
+            assert isinstance(json.loads(t.finish()), dict) and t.output == '', t.output
+        t = Terminal(['project', 'labels', 'invalid'], color_env); t.finish(1)
+        assert '\x1b[31m' in t.output, t.output
+        print('PASS Every project action uses consistent colors and preserves NO_COLOR, --no-color and JSON')
+
+        def activity_env(mode='slow', paired=True):
+            folder = Path(tempfile.mkdtemp(prefix='activity-', dir=root))
+            saved = folder / '.config/greatping'
+            saved.mkdir(parents=True)
+            value = json.loads((config / 'config.json').read_text()) if paired else {
+                'apiUrl': 'https://greatping-api-dev.ueldo343.workers.dev'}
+            (saved / 'config.json').write_text(json.dumps(value))
+            return {**env, 'HOME': str(folder), 'XDG_CONFIG_HOME': str(folder / '.config'),
+                    'GREATPING_TEST_ACTIVITY': mode}, saved
+
+        activity_commands = [(['pause', '30m'], 'Pausing', 'paused until'),
+                             (['resume'], 'Resuming', 'are on'),
+                             (['project', 'labels', 'folder'], 'Updating', 'now show'),
+                             (['doctor'], 'Checking pairing', 'Everything looks good'),
+                             (['test'], 'Sending a test', 'accepted by Apple'),
+                             (['logout', '--yes'], 'Unpairing', 'Unpaired.'),
+                             (['hooks', 'install', 'claude'], 'Syncing', 'will alert'),
+                             (['setup', 'claude', '--yes', '--no-skill'], 'Syncing', 'Claude Code')]
+        for args, label, result_text in activity_commands:
+            delayed, _ = activity_env()
+            t = Terminal(args, delayed); t.wait(label)
+            assert t.process.poll() is None, 'Command finished before loading was visible'
+            t.finish()
+            final = screen(t.output, t.cols)
+            assert label not in final and result_text in final, final
+            assert '\x1b[?25h' in t.output, t.output
+        for args, label, _ in activity_commands[:3]:
+            for mode, text in [('error', 'no longer paired'), ('network', 'Could not reach')]:
+                delayed, _ = activity_env(mode)
+                t = Terminal(args, delayed); t.wait(label); t.finish(1)
+                final = screen(t.output, t.cols)
+                assert label not in final and text in final, final
+                assert '\x1b[?25h' in t.output
+        print('PASS Pause, resume, project labels, doctor, test, logout and hook refresh show and clear progress')
+
+        cancellation_commands = [(args, label, True) for args, label, _ in activity_commands]
+        cancellation_commands += [(['login'], 'Creating a pairing', False),
+                                  (['uninstall', '--yes'], 'Removing GreatPing', True)]
+        for args, label, paired in cancellation_commands:
+            for sig, code in [(signal.SIGINT, 130), (signal.SIGTERM, 143)]:
+                delayed, saved = activity_env('hang', paired)
+                before = (saved / 'config.json').read_bytes()
+                t = Terminal(args, delayed); t.wait(label)
+                started = time.monotonic(); os.killpg(t.process.pid, sig); t.finish(code)
+                assert time.monotonic() - started < 2, 'Cancellation kept waiting for a request'
+                active_label = 'Unpairing this computer from GreatPing' if args[0] == 'logout' else label
+                assert active_label not in screen(t.output, t.cols) and '\x1b[?25h' in t.output, (args, sig, t.output)
+                assert (saved / 'config.json').read_bytes() == before, 'Interrupted operation discarded pairing'
+        delayed, _ = activity_env('poll-hang')
+        t = Terminal(['test'], delayed); t.wait('Waiting for Apple and Google')
+        os.killpg(t.process.pid, signal.SIGINT); t.finish(130)
+        assert 'Waiting for Apple' not in screen(t.output, t.cols) and '\x1b[?25h' in t.output
+        delayed, _ = activity_env()
+        t = Terminal(['test', '--json'], delayed, split=True)
+        assert json.loads(t.finish())['pending'] is False and t.output == '', t.output
+        for extra in [{'CI': '1'}, {'TERM': 'dumb'}]:
+            delayed, _ = activity_env()
+            t = Terminal(['resume'], {**delayed, **extra}); t.finish()
+            assert 'Resuming' not in t.output and '\x1b' not in t.output, t.output
+        delayed, _ = activity_env()
+        result = subprocess.run([NODE, str(CLI), 'pause', '30m'], env=delayed,
+                                capture_output=True, timeout=5)
+        assert result.returncode == 0 and result.stdout == b''
+        assert b'Pausing' not in result.stderr and b'\x1b' not in result.stderr
+        print('PASS Activity cancellation restores the cursor, preserves pairing and keeps JSON/CI/pipes clean')
+
+        delayed, _ = activity_env()
+        t = Terminal(['run', '--', NODE, '-e', 'process.exit(7)'], delayed)
+        t.wait('Sending completion notice'); t.finish(7)
+        assert 'Sending completion' not in screen(t.output, t.cols) and '\x1b[?25h' in t.output
+        print('PASS Completion notice progress preserves the child command exit code')
+
+        delayed, _ = activity_env()
+        t = Terminal(['ask', 'Deploy?'], delayed)
+        t.wait('Sending question'); t.wait('Waiting for your answer'); t.finish()
+        final = screen(t.output, t.cols)
+        assert 'Sending question' not in final and 'Waiting' not in final and 'Ship it' in final, final
+        print('PASS Question creation progress transitions to waiting and leaves a clean answer')
+
         for cols in [100, 32, 8]:
             t = Terminal(['ask', 'Deploy?'], env, cols=cols)
             t.finish()
@@ -151,8 +277,8 @@ try:
             t.finish()
             final = screen(t.output, cols)
             assert 'Sending' not in final, final
-            assert 'GreatPingacceptedthenotice.' in re.sub(r'\s', '', final), final
-            assert t.output.rfind('\x1b[2K') < t.output.index('GreatPing accepted'), t.output
+            assert 'Notificationqueued.' in re.sub(r'\s', '', final), final
+            assert t.output.rfind('\x1b[2K') < t.output.index('Notification queued.'), t.output
             assert '\x1b[?25h' in t.output, 'Cursor not restored'
         for mode, code, text in [('paused', 0, 'paused'), ('error', 1, 'pair again'),
                                  ('network', 1, 'Check your internet connection')]:
@@ -160,7 +286,7 @@ try:
             t.wait('Sending'); t.finish(code)
             final = screen(t.output, t.cols)
             assert 'Sending' not in final and text in final, final
-            assert 'GreatPing accepted' not in final, final
+            assert 'Notification queued.' not in final, final
             assert '\x1b[?25h' in t.output
         print('PASS Notify shows immediate progress and replaces it on acceptance, pause and errors')
 
@@ -172,7 +298,7 @@ try:
             assert '\x1b[?25h' in t.output
         t = Terminal(['notify', 'Build complete'], env)
         t.wait('Sending'); t.resize(32); t.finish()
-        assert t.output.rfind('\x1b[2K') < t.output.index('GreatPing accepted')
+        assert t.output.rfind('\x1b[2K') < t.output.index('Notification queued.')
         for extra in [{}, {'CI': '1'}, {'TERM': 'dumb'}]:
             t = Terminal(['notify', 'Build complete', '--json'], {**env, **extra}, split=True)
             assert json.loads(t.finish()) == {'requestId': 'terminal-notice', 'status': 'accepted'}
@@ -185,6 +311,56 @@ try:
         assert result.returncode == 0 and result.stdout == b''
         assert b'Sending' not in result.stderr and b'\x1b' not in result.stderr
         print('PASS Notify interruption, resize, JSON, CI and redirected output preserve terminal state')
+
+        status_env = {**env, 'GREATPING_TEST_STATUS': 'slow'}
+        for cols in [100, 32, 8]:
+            t = Terminal(['status'], status_env, cols=cols)
+            t.wait('Checking' if cols > 8 else '⠋')
+            assert t.process.poll() is None, 'Status completed before progress was visible'
+            t.finish()
+            final = screen(t.output, cols)
+            assert 'Checking' not in final, final
+            assert 'TerminalMac' in re.sub(r'\s', '', final), final
+            assert t.output.rfind('\x1b[2K') < t.output.index('Status'), t.output
+            assert '\x1b[?25h' in t.output
+        for mode, text in [('revoked', 'no longer paired'), ('network', 'Could not reach GreatPing')]:
+            t = Terminal(['status'], {**env, 'GREATPING_TEST_STATUS': mode})
+            t.wait('Checking'); t.finish(1)
+            final = screen(t.output, t.cols)
+            assert 'Checking' not in final and text in final, final
+            assert '\x1b[?25h' in t.output
+        t = Terminal(['status'], {**env, 'GREATPING_TEST_STATUS': 'report-slow'})
+        t.wait('Checking')
+        started = time.monotonic()
+        while time.monotonic() - started < .4:
+            t.read()
+        assert t.process.poll() is None and 'Status' not in t.output, t.output
+        t.resize(32); t.finish()
+        assert 'Checking' not in screen(t.output, 32)
+        print('PASS Status shows progress through lookup and refresh, then clears it before results or errors')
+
+        for sig, code in [(signal.SIGINT, 130), (signal.SIGTERM, 143)]:
+            t = Terminal(['status'], {**env, 'GREATPING_TEST_STATUS': 'hang'})
+            t.wait('Checking'); started = time.monotonic()
+            os.killpg(t.process.pid, sig); t.finish(code)
+            assert time.monotonic() - started < 2, 'Status cancellation kept waiting for refresh'
+            final = screen(t.output, t.cols)
+            assert 'Checking' not in final and 'Status check interrupted' in final, final
+            assert '\x1b[?25h' in t.output
+        for extra in [{}, {'CI': '1'}, {'TERM': 'dumb'}]:
+            t = Terminal(['status', '--json'], {**status_env, **extra}, split=True)
+            assert json.loads(t.finish())['paired'] is True
+            assert t.output == '', t.output
+        t = Terminal(['status', '--json'], {**env, 'GREATPING_TEST_STATUS': 'revoked'}, split=True)
+        assert json.loads(t.finish(1))['revoked'] is True and t.output == ''
+        for extra in [{'CI': '1'}, {'TERM': 'dumb'}]:
+            t = Terminal(['status'], {**status_env, **extra}); t.finish()
+            assert 'Checking' not in t.output and '\x1b' not in t.output, t.output
+        result = subprocess.run([NODE, str(CLI), 'status'], env=status_env,
+                                capture_output=True, timeout=5)
+        assert result.returncode == 0 and result.stdout == b''
+        assert b'Checking' not in result.stderr and b'\x1b' not in result.stderr
+        print('PASS Status signals cancel all requests, restore the cursor and preserve JSON/CI/pipe output')
 
         endpoint = 'greatping-api-dev.ueldo343.workers.dev'
         for args in [['login'], ['status'], ['doctor']]:
