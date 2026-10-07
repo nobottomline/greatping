@@ -1,5 +1,6 @@
 import process from 'node:process';
 import type { PingRequest } from '@greatping/protocol';
+import { UnverifiedAnswerError } from '../content';
 import { parseDuration } from '../duration';
 import { askQuestion, sendNotice } from '../operations';
 import { command, elapsed, muted, spinner, ui } from '../ui';
@@ -72,6 +73,14 @@ export async function ask(
       process.stdout.write(`${result.answer?.choice ?? result.answer?.text ?? ''}\n`);
     }
     return 0;
+  } catch (error) {
+    if (!(error instanceof UnverifiedAnswerError)) throw error;
+    stopProgress();
+    ui.error(
+      error.message,
+      'The question was withdrawn. Ask again; if this repeats, contact support.',
+    );
+    return 3;
   } finally {
     stopProgress();
     process.off('SIGINT', interrupt);

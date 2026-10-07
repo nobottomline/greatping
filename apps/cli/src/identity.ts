@@ -36,6 +36,13 @@ const settingsSchema = z.object({
   projectLabels: z.enum(['folder', 'hidden']).default('hidden'),
   /** Per-project overrides, keyed by the project root path. */
   projects: z.record(z.string(), overrideSchema).default({}),
+  /**
+   * Projects alerts named recently, by opaque key: lets a device's command for
+   * a key reach the project's root, and the report list them. Local only.
+   */
+  recent: z
+    .record(z.string(), z.strictObject({ root: z.string(), seenAt: z.number() }))
+    .default({}),
 });
 type Settings = z.infer<typeof settingsSchema>;
 
@@ -96,6 +103,7 @@ export function loadSettings(): Settings {
     secret: randomBytes(32).toString('base64url'),
     projectLabels: 'hidden',
     projects: {},
+    recent: {},
   };
   if (existsSync(identityPath())) {
     save(fresh);
@@ -163,13 +171,83 @@ export function projectFields(
   } catch {
     return {};
   }
+  const projectKey = opaque(settings.secret, 'project', root);
+  noteRecent(settings, projectKey, root);
   const override = settings.projects[root];
   if (override && 'hidden' in override) return {};
   const label = (override?.name ?? basename(root)).slice(0, LIMITS.projectLabelMaxLength).trim();
-  return {
-    projectKey: opaque(settings.secret, 'project', root),
-    ...(label ? { projectLabel: label } : {}),
-  };
+  return { projectKey, ...(label ? { projectLabel: label } : {}) };
+}
+
+/** Projects listed to devices: seen within the history window, newest first. */
+const RECENT_DAYS = LIMITS.historyRetentionDays;
+const RECENT_MAX = 50;
+/** A project already listed is re-stamped at most this often, to keep hook writes rare. */
+const RECENT_REFRESH_MS = 3600 * 1000;
+
+function noteRecent(settings: Settings, key: string, root: string, now = Date.now()) {
+  const known = settings.recent[key];
+  if (known && known.root === root && now - known.seenAt < RECENT_REFRESH_MS) return;
+  try {
+    update((current) => {
+      current.recent[key] = { root, seenAt: now };
+      const cutoff = now - RECENT_DAYS * 24 * 3600 * 1000;
+      const kept = Object.entries(current.recent)
+        .filter(([, project]) => project.seenAt > cutoff)
+        .sort(([, a], [, b]) => b.seenAt - a.seenAt)
+        .slice(0, RECENT_MAX);
+      current.recent = Object.fromEntries(kept);
+    });
+  } catch {
+    // Listing is a convenience; an alert never fails over it.
+  }
+}
+
+/** The recent projects as devices see them: folder name, a set name, hidden. */
+export function recentProjects(now = Date.now()) {
+  const settings = readSettings();
+  if (!settings) return [];
+  const cutoff = now - RECENT_DAYS * 24 * 3600 * 1000;
+  return Object.entries(settings.recent)
+    .filter(([, project]) => project.seenAt > cutoff)
+    .sort(([, a], [, b]) => b.seenAt - a.seenAt)
+    .slice(0, RECENT_MAX)
+    .flatMap(([key, { root }]) => {
+      const label = basename(root).slice(0, LIMITS.projectLabelMaxLength).trim();
+      if (!label) return [];
+      const override = settings.projects[root];
+      return [
+        {
+          key,
+          label,
+          ...(override && 'name' in override ? { name: override.name } : {}),
+          ...(override && 'hidden' in override ? { hidden: true } : {}),
+        },
+      ];
+    });
+}
+
+/**
+ * Applies a device's rename or hide of a recent project to the local
+ * overrides `greatping project` uses. Returns false for an unknown key.
+ */
+export function applyProjectCommand(
+  key: string,
+  command: { name?: string | null | undefined; hidden?: boolean | undefined },
+): boolean {
+  const root = readSettings()?.recent[key]?.root;
+  if (!root) return false;
+  update((settings) => {
+    const current = settings.projects[root];
+    let next: ProjectOverride | null = current ?? null;
+    if (command.hidden === true) next = { hidden: true };
+    else if (command.hidden === false && next && 'hidden' in next) next = null;
+    if (command.name !== undefined && command.hidden !== true)
+      next = command.name === null ? null : { name: command.name };
+    if (next) settings.projects[root] = next;
+    else delete settings.projects[root];
+  });
+  return true;
 }
 
 export function cachedProjectLabels(): ProjectLabels {

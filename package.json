@@ -18,7 +18,12 @@
     "secrets": "node scripts/quality/check-secrets.mjs",
     "secrets:tree": "node scripts/quality/check-secrets.mjs tree",
     "secrets:history": "node scripts/quality/check-secrets.mjs history",
-    "test:quality": "node --test scripts/quality/*.test.mjs"
+    "test:quality": "node --test scripts/quality/*.test.mjs",
+    "plugins:build": "node scripts/build-agent-plugins.mjs",
+    "plugins:check": "node scripts/build-agent-plugins.mjs --check",
+    "plugins:test": "node --test scripts/agent-plugins.test.mjs scripts/native-adapters.test.mjs",
+    "plugins:test:hosts": "pnpm -F greatping build && node scripts/verify-agent-plugins.mjs",
+    "plugins:test:native": "pnpm -F greatping build && node scripts/verify-native-adapters.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",

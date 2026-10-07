@@ -6,19 +6,30 @@ import {
   type ResolveRequestBody,
   type ResolveRequestResponse,
 } from '@greatping/protocol';
-import { api } from '../api';
-import { type Config, isPaired, loadConfig } from '../config';
+import { ApiError, api, takeCommandsWaiting } from '../api';
+import { type Config, isPaired, loadConfig, pairingProblem } from '../config';
+import { sealRequest, syncProjectCommands } from '../content';
 import { correlationId, loadSettings, projectFields, readSettings, threadId } from '../identity';
 import { reportMachine } from '../report';
-import { type ClaudeAlert, claudeSteps, codexSteps, type HookInput, type HookStep } from './events';
+import {
+  type ClaudeAlert,
+  claudeSteps,
+  codexSteps,
+  cursorSteps,
+  type HookInput,
+  type HookStep,
+  nativeSteps,
+} from './events';
 import { isAway } from './presence';
 import {
+  type AlertProblem,
   claimReport,
   forget,
   type HostId,
   markOpen,
   openedAgo,
   pruneAlerts,
+  recordAlert,
   touchHeartbeat,
 } from './state';
 
@@ -48,7 +59,13 @@ export async function readHookInput(): Promise<HookInput | null> {
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The alert host each hook host reports as. */
-export const ALERT_HOST: Record<HostId, AlertHost> = { claude: 'claude-code', codex: 'codex' };
+export const ALERT_HOST: Record<HostId, AlertHost> = {
+  claude: 'claude-code',
+  codex: 'codex',
+  opencode: 'opencode',
+  pi: 'pi',
+  cursor: 'cursor',
+};
 
 /**
  * Hooks of one event run in parallel processes: the event that closes a
@@ -56,6 +73,18 @@ export const ALERT_HOST: Record<HostId, AlertHost> = { claude: 'claude-code', co
  * young may still be on its way, so closing it is retried briefly.
  */
 const RACE_WINDOW_MS = 10_000;
+
+function alertProblem(error: unknown): AlertProblem {
+  if (error instanceof ApiError) {
+    if (error.status === 401) return 'revoked';
+    if (error.status === 429) return 'rate_limited';
+    if (error.status >= 500) return 'service';
+    return error.status === 0 ? 'network' : 'rejected';
+  }
+  if (error instanceof Error && ['TimeoutError', 'AbortError'].includes(error.name))
+    return 'timeout';
+  return 'local';
+}
 
 async function resolveOnServer(
   config: Config,
@@ -82,6 +111,11 @@ export async function runSteps(
   cwd?: string,
 ): Promise<void> {
   const paired = isPaired(config);
+  const readiness = pairingProblem(config);
+  if (readiness) {
+    if (steps.some((step) => step.op === 'notify')) recordAlert(host, readiness);
+    if (readiness === 'environment_mismatch') return;
+  }
   const alertHost = ALERT_HOST[host];
   // Without settings there is no secret yet, so nothing can have been opened here.
   const settings = paired ? loadSettings() : readSettings();
@@ -90,21 +124,43 @@ export async function runSteps(
   for (const step of steps) {
     if (step.op === 'notify') {
       if (!paired) continue;
-      const correlation = correlationId(alertHost, session, step.correlation, settings.secret);
-      markOpen(host, thread, correlation);
-      const { projectKey, projectLabel } = projectFields(cwd, settings);
-      const body: CreateRequestBody = {
-        kind: 'attention',
-        host: alertHost,
-        reason: step.reason,
-        thread,
-        correlation,
-        ...(projectKey ? { projectKey } : {}),
-        content: { enc: 0, ...(projectLabel ? { projectLabel } : {}) },
-        timeoutSec: LIMITS.attentionTimeoutSec,
-        away: isAway(),
-      };
-      await api(config, 'POST', '/requests', { body, signal: AbortSignal.timeout(3000) });
+      try {
+        const correlation = correlationId(alertHost, session, step.correlation, settings.secret);
+        markOpen(host, thread, correlation);
+        const { projectKey, projectLabel } = projectFields(cwd, settings);
+        // The label is the alert's only content, sealed to the account's devices.
+        // Without it, or if sealing fails, the alert goes without a label.
+        const envelope = projectLabel
+          ? await sealRequest(
+              config,
+              {
+                kind: 'attention',
+                host: alertHost,
+                reason: step.reason,
+                ...(projectKey ? { projectKey } : {}),
+              },
+              { projectLabel },
+              { fresh: false },
+            ).catch(() => null)
+          : null;
+        const body: CreateRequestBody = {
+          kind: 'attention',
+          host: alertHost,
+          reason: step.reason,
+          thread,
+          correlation,
+          ...(projectKey ? { projectKey } : {}),
+          ...(envelope ? { envelope } : {}),
+          timeoutSec: LIMITS.attentionTimeoutSec,
+          away: isAway(),
+        };
+        await api(config, 'POST', '/requests', { body, signal: AbortSignal.timeout(3000) });
+        recordAlert(host, null);
+        if (takeCommandsWaiting()) await syncProjectCommands(config).catch(() => {});
+      } catch (error) {
+        recordAlert(host, alertProblem(error));
+        throw error;
+      }
       continue;
     }
     const correlation =
@@ -145,10 +201,17 @@ export async function runHook(
             finished: options.finished,
             ...(options.alerts ? { alerts: options.alerts } : {}),
           })
-        : codexSteps(input, { finished: options.finished });
+        : host === 'codex'
+          ? codexSteps(input, { finished: options.finished })
+          : host === 'cursor'
+            ? cursorSteps(input, { finished: options.finished })
+            : nativeSteps(input, { finished: options.finished });
     const config = loadConfig();
-    if (steps.length > 0 && input.session_id) {
-      await runSteps(host, input.session_id, steps, config, input.cwd);
+    const session =
+      host === 'cursor' ? (input.conversation_id ?? input.session_id) : input.session_id;
+    const cwd = host === 'cursor' ? input.workspace_roots?.[0] : input.cwd;
+    if (steps.length > 0 && session) {
+      await runSteps(host, session, steps, config, cwd);
     }
     if (steps.some((step) => step.op === 'resolve-session')) pruneAlerts();
     if (claimReport(REPORT_INTERVAL_MS)) await reportMachine(config);

@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { nativeHome } from './native-adapters';
 import { fingerprint, forgetAsset, ownedAssets, recordAsset } from './ownership';
 
 // Pin the manager used by setup and removal; hooks never download a runner.
@@ -44,7 +45,9 @@ export function checkManagedSkill(): void {
       `The managed skill was changed: ${canonicalSkillPath()}. Review it before removal.`,
     );
 }
-export async function removeManagedSkill(agent?: 'claude-code' | 'codex'): Promise<void> {
+export async function removeManagedSkill(
+  agent?: 'claude-code' | 'codex' | 'opencode' | 'pi' | 'cursor',
+): Promise<void> {
   checkManagedSkill();
   const args = [
     '--yes',
@@ -79,16 +82,18 @@ export async function removeManagedSkill(agent?: 'claude-code' | 'codex'): Promi
     throw new Error('The skills manager left the GreatPing skill installed.');
   // Managers may warn about failed link removal yet exit successfully. Check
   // native paths too, including dangling links that existsSync cannot see.
-  const nativePaths = [
-    join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'skills', 'greatping'),
-    join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'skills', 'greatping'),
-  ];
-  const checked =
-    agent === 'claude-code'
-      ? nativePaths.slice(0, 1)
-      : agent === 'codex'
-        ? nativePaths.slice(1)
-        : nativePaths;
+  const nativePaths = {
+    'claude-code': join(
+      process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'),
+      'skills',
+      'greatping',
+    ),
+    codex: join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'skills', 'greatping'),
+    opencode: join(nativeHome('opencode'), 'skills', 'greatping'),
+    pi: join(nativeHome('pi'), 'skills', 'greatping'),
+    cursor: join(nativeHome('cursor'), 'skills', 'greatping'),
+  };
+  const checked = agent ? [nativePaths[agent]] : Object.values(nativePaths);
   for (const path of checked) {
     let remains = false;
     try {

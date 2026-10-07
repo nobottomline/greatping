@@ -1,0 +1,10 @@
+{
+  "greatping": {
+    "command": "node",
+    "args": [
+      "${PLUGIN_ROOT}/scripts/bridge.mjs",
+      "codex",
+      "mcp"
+    ]
+  }
+}

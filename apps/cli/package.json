@@ -1,6 +1,6 @@
 {
   "name": "greatping",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Get an alert on your phone when your coding agent needs you",
   "keywords": [
     "cli",
@@ -42,9 +42,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
+    "@noble/ciphers": "^2.4.0",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
     "picocolors": "^1.1.1",
+    "smol-toml": "^1.9.0",
     "toqr": "0.1.1",
     "ws": "^8.18.0",
     "zod": "^4.6.5"

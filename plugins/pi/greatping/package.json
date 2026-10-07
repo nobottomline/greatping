@@ -1,0 +1,31 @@
+{
+  "name": "@greatping/pi",
+  "version": "0.1.1",
+  "type": "module",
+  "license": "MIT",
+  "description": "GreatPing native pi adapter, phone alerts, tools and skill.",
+  "repository": "https://github.com/nobottomline/greatping",
+  "files": [
+    "index.js",
+    "bridge.mjs",
+    "native.mjs",
+    "skills",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.20.0"
+  },
+  "keywords": [
+    "pi-package",
+    "notifications"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.js"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  }
+}

@@ -5,6 +5,7 @@ const mode = process.env.GREATPING_TEST_MODE ?? 'answered';
 const log = process.env.GREATPING_TEST_LOG;
 const paused = mode === 'paused';
 let until = null;
+let question = null;
 if (mode === 'cleanup-fail') {
   const original = fs.rmSync;
   fs.rmSync = (path, options) => {
@@ -12,6 +13,18 @@ if (mode === 'cleanup-fail') {
     return original(path, options);
   };
   syncBuiltinESMExports();
+}
+
+/**
+ * The phone's sealed answer: it reads the question and picks its first choice,
+ * or answers in words; `forged` is signed by a key the account does not hold.
+ * Loaded lazily, since only question flows need the protocol (TypeScript).
+ */
+async function phoneAnswer(envelope) {
+  const { answerFor, openAsPhone, stranger } = await import('./account.mjs');
+  const content = openAsPhone(envelope);
+  const answer = content.choices?.length ? { choice: content.choices[0] } : { text: 'Yes' };
+  return answerFor(envelope, answer, mode === 'forged' ? stranger : undefined);
 }
 
 globalThis.fetch = async (url, init) => {
@@ -33,7 +46,9 @@ globalThis.fetch = async (url, init) => {
     until = body.until;
     return json({ alertsPausedUntil: until });
   }
+  if (path === '/v1/manifests' && init.method === 'GET') return json({ manifests: [] });
   if (path === '/v1/requests' && init.method === 'POST') {
+    question = body.envelope ?? null;
     if (mode === 'cancel') await new Promise((resolve) => setTimeout(resolve, 250));
     return json({ id: 'test-request', status: 'pending', expiresAt: Date.now() + 60000, paused });
   }
@@ -41,7 +56,7 @@ globalThis.fetch = async (url, init) => {
     return json({
       id: 'test-request',
       status: mode === 'expired' ? 'expired' : 'answered',
-      answer: mode === 'expired' ? null : { choice: 'Yes' },
+      answerEnvelope: mode === 'expired' || !question ? null : await phoneAnswer(question),
     });
   if (path === '/v1/requests/test-request/cancel') return new Response(null, { status: 204 });
   throw new Error(`Unexpected fixture route ${init.method} ${path}`);

@@ -42,7 +42,7 @@ existing credential is never moved silently to a different backend.
 
 ## Privacy
 
-Hook alerts carry fixed text only: nothing from a prompt (questions, commands, file names) leaves the computer. Messages you send yourself with `notify` or `ask` pass through the GreatPing service and the push provider, so never put secrets in them. The CLI stores its machine credential in `~/.config/greatping/config.json` (or `%APPDATA%\greatping` on Windows), readable only by you.
+Hook alerts carry fixed text only: nothing from a prompt (questions, commands, file names) leaves the computer. Content sent with `notify` or `ask` is encrypted to verified account devices before reaching the service. Providers still see routing metadata; the device decrypts alert content. The CLI stores its machine credential in `~/.config/greatping/config.json` (or `%APPDATA%\greatping` on Windows), readable only by you.
 
 ## The skill
 
@@ -51,6 +51,26 @@ The agent skill is in [`skills/greatping`](skills/greatping/SKILL.md). `greatpin
 ```bash
 npx skills add nobottomline/greatping
 ```
+
+## Agent plugins
+
+CLI 0.4.0 provides [native OpenCode and Pi adapters](plugins/native-adapters.md).
+Run `greatping setup opencode --yes` or `greatping setup pi --yes`, then restart
+the host. Both packages are bundled locally; no second download is needed.
+CLI 0.3.3 and earlier lack this support. OpenCode covers questions, permissions and
+finished responses; Pi covers extension UI prompts and settled responses, with
+five native GreatPing tools. The guide records tested host versions and limits.
+
+The preview [Claude Code and Codex plugins](plugins/README.md) package hooks, local
+MCP and the same skill. They require an installed GreatPing CLI >=0.4.0 and
+Node.js >=22.20.0. CLI 0.4.0 configures an installed plugin with `greatping setup claude|codex`
+and migrates direct integrations with `--migrate`. Codex still requires hook trust
+in `/hooks`; automatic questions and permissions are covered only in Claude Code.
+
+The source contains Git marketplace catalogs. See the plugin guide for local
+installation, source-versus-release prerequisites and migration. Official plugin
+directory acceptance and phone-delivery qualification are separate steps.
+Keep `npx skills` for hosts where you use the skill independently.
 
 ## Removal
 
@@ -67,6 +87,7 @@ and preserved. See the [CLI removal reference](apps/cli/README.md#removal).
 | [`apps/cli`](apps/cli) | The `greatping` command, hooks, MCP server ([command reference](apps/cli/README.md)) |
 | [`packages/protocol`](packages/protocol) | Request and response types shared with the service |
 | [`skills/greatping`](skills/greatping) | The agent skill |
+| [`plugins`](plugins) | Claude Code/Codex plugins, OpenCode/Pi adapters and installation guides |
 
 It is published from GreatPing's internal monorepo; the service and the mobile apps are not open source. See [CONTRIBUTING.md](CONTRIBUTING.md), [SUPPORT.md](SUPPORT.md),
 [SECURITY.md](SECURITY.md) and [community conduct](CODE_OF_CONDUCT.md).
@@ -86,3 +107,11 @@ See [SECURITY.md](SECURITY.md); do not disclose vulnerabilities in public issues
 ## License
 
 [MIT](LICENSE)
+
+
+Cursor IDE local preview: `greatping setup cursor --yes` installs the bundled
+native plugin with completion hooks, MCP tools and skill. Reload the IDE and
+inspect Customize. Native question/permission waiting and Agent CLI plugin
+loading are not qualified. See [Cursor guide](plugins/cursor.md) and
+[alert troubleshooting](plugins/troubleshooting.md). This installer requires a
+CLI >=0.4.0.

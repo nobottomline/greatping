@@ -12,7 +12,9 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { managedSkillInstalled } from './managed-skills';
+import { nativeHome } from './native-adapters';
 import { fingerprint, forgetAsset, ownedAssets, recordAsset } from './ownership';
+import { claudeHome } from './plugins';
 import type { HostId } from './state';
 
 /**
@@ -23,8 +25,10 @@ import type { HostId } from './state';
 
 /** Where each host reads user-level skills. */
 export function skillDir(host: HostId): string {
+  if (host === 'cursor') return join(nativeHome(host), 'skills', 'greatping');
+  if (host === 'opencode' || host === 'pi') return join(nativeHome(host), 'skills', 'greatping');
   return host === 'claude'
-    ? join(homedir(), '.claude', 'skills', 'greatping')
+    ? join(claudeHome(), 'skills', 'greatping')
     : join(homedir(), '.agents', 'skills', 'greatping');
 }
 

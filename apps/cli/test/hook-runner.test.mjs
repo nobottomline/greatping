@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_API_URL } from '../src/config.ts';
+import { lastAlert, pruneAlerts } from '../src/integrations/state.ts';
 
 const cli =
   process.env.GREATPING_TEST_CLI ?? fileURLToPath(new URL('../dist/index.js', import.meta.url));
@@ -34,10 +35,13 @@ function withHook(run) {
     existsSync(records)
       ? readFileSync(records, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse)
       : [];
-  const hook = (input, { finished = true, entrypoint, disable, fail = false } = {}) => {
+  const hook = (
+    input,
+    { finished = true, entrypoint, disable, fail = false, host = 'claude' } = {},
+  ) => {
     const result = spawnSync(
       process.execPath,
-      ['--import', transport, cli, 'hook', 'claude', ...(finished ? ['--finished'] : [])],
+      ['--import', transport, cli, 'hook', host, ...(finished ? ['--finished'] : [])],
       {
         cwd: home,
         env: {
@@ -66,7 +70,7 @@ function withHook(run) {
     return calls();
   };
   try {
-    run(hook, calls);
+    run(hook, calls, { configDir });
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -82,7 +86,8 @@ for (const entrypoint of [undefined, 'cli', 'sdk-ts', 'sdk-py', 'sdk-cli', 'cust
       assert.equal(calls[0].body.kind, 'attention');
       assert.equal(calls[0].body.host, 'claude-code');
       assert.equal(calls[0].body.reason, 'finished');
-      assert.deepEqual(calls[0].body.content, { enc: 0 });
+      // Without a project label an attention alert has no content to seal.
+      assert.equal(calls[0].body.envelope, undefined);
       assert.ok(calls[0].body.thread);
       assert.ok(!JSON.stringify(calls).includes('private reply'));
       assert.ok(!JSON.stringify(calls).includes(stop.session_id));
@@ -128,5 +133,132 @@ test('malformed or oversized hook input never reaches the transport', () => {
   withHook((hook) => {
     assert.deepEqual(hook('not JSON'), []);
     assert.deepEqual(hook(JSON.stringify({ ...stop, padding: 'x'.repeat(256 * 1024) })), []);
+  });
+});
+
+for (const host of ['opencode', 'pi', 'cursor']) {
+  test(`${host} reports an issuer mismatch without sending credentials or creating alert marks`, () => {
+    withHook((hook, _calls, { configDir }) => {
+      const config = join(configDir, 'config.json');
+      const saved = {
+        apiUrl: 'https://fixture-wrong-issuer.invalid',
+        machineId: 'private-machine',
+        machineToken: 'private-token',
+      };
+      writeFileSync(config, JSON.stringify(saved));
+      const input =
+        host === 'cursor'
+          ? {
+              hook_event_name: 'stop',
+              conversation_id: 'private-conversation',
+              status: 'completed',
+            }
+          : {
+              hook_event_name: 'PromptOpen',
+              session_id: 'private-session',
+              correlation: 'private-id',
+              reason: 'question',
+            };
+      assert.deepEqual(hook(input, { host }), []);
+      const attempt = JSON.parse(readFileSync(join(configDir, 'hook-state', `${host}.alert.json`)));
+      assert.equal(attempt.outcome, 'failed');
+      assert.equal(attempt.problem, 'environment_mismatch');
+      assert.equal(existsSync(join(configDir, 'hook-state', host)), false);
+      assert.deepEqual(JSON.parse(readFileSync(config)), saved);
+      assert.ok(!JSON.stringify(attempt).includes('private'));
+    });
+  });
+}
+
+test('alert diagnostics distinguish transport failure, observed closure and service acceptance', () => {
+  withHook((hook, _calls, { configDir }) => {
+    const health = join(configDir, 'hook-state/claude.alert.json');
+    hook(stop, { fail: true });
+    const failed = JSON.parse(readFileSync(health));
+    assert.equal(failed.problem, 'network');
+    assert.equal(failed.outcome, 'failed');
+    hook({ hook_event_name: 'UserPromptSubmit', session_id: stop.session_id });
+    assert.deepEqual(
+      JSON.parse(readFileSync(health)),
+      failed,
+      'closure is not proof of sending another alert',
+    );
+    hook(stop);
+    const accepted = JSON.parse(readFileSync(health));
+    assert.equal(accepted.outcome, 'accepted');
+    assert.equal(accepted.problem, null);
+    assert.ok(accepted.at >= failed.at);
+  });
+});
+
+test('Cursor only alerts for completed stop and resolves the next prompt, with no private content', () => {
+  withHook((hook, calls) => {
+    const input = {
+      hook_event_name: 'stop',
+      conversation_id: 'private-conversation',
+      workspace_roots: [],
+      transcript_path: 'private-transcript',
+      user_email: 'private-email',
+    };
+    for (const status of ['error', 'aborted', undefined])
+      assert.deepEqual(hook({ ...input, status }, { host: 'cursor' }), []);
+    const [opened] = hook({ ...input, status: 'completed' }, { host: 'cursor' });
+    assert.equal(opened.body.host, 'cursor');
+    assert.equal(opened.body.reason, 'finished');
+    const resolved = hook({ ...input, hook_event_name: 'beforeSubmitPrompt' }, { host: 'cursor' });
+    assert.deepEqual(resolved[1].body, { host: 'cursor', thread: opened.body.thread });
+    assert.ok(!JSON.stringify(calls()).includes('private'));
+  });
+});
+
+test('health diagnostics redact unknown fields, reject unknown categories and survive mark pruning', () => {
+  withHook((_hook, _calls, { configDir }) => {
+    const before = process.env.XDG_CONFIG_HOME;
+    process.env.XDG_CONFIG_HOME = join(configDir, '..');
+    try {
+      const path = join(configDir, 'hook-state/opencode.alert.json');
+      writeFileSync(
+        path,
+        JSON.stringify({
+          at: 1,
+          outcome: 'failed',
+          problem: 'network',
+          details: 'private-payload',
+        }),
+      );
+      assert.deepEqual(lastAlert('opencode'), { at: 1, outcome: 'failed', problem: 'network' });
+      // Exercise the actual CLI entrypoint too, including an installed archive.
+      mkdirSync(join(configDir, '..', 'opencode'));
+      writeFileSync(
+        join(configDir, 'config.json'),
+        JSON.stringify({
+          apiUrl: 'https://fixture-wrong-issuer.invalid',
+          machineId: 'test-machine',
+          machineToken: 'test-token',
+        }),
+      );
+      const status = spawnSync(process.execPath, [cli, 'status', '--json'], {
+        env: {
+          PATH: process.env.PATH,
+          HOME: join(configDir, '..', '..'),
+          XDG_CONFIG_HOME: join(configDir, '..'),
+        },
+        encoding: 'utf8',
+        timeout: 10000,
+      });
+      assert.equal(status.status, 1, status.stderr);
+      assert.deepEqual(
+        JSON.parse(status.stdout).plugins.find((p) => p.id === 'opencode').lastAlert,
+        { at: 1, outcome: 'failed', problem: 'network' },
+      );
+      assert.ok(!status.stdout.includes('private-payload'));
+      pruneAlerts();
+      assert.ok(existsSync(path));
+      writeFileSync(path, JSON.stringify({ at: 1, outcome: 'failed', problem: 'private-payload' }));
+      assert.equal(lastAlert('opencode'), null);
+    } finally {
+      if (before === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = before;
+    }
   });
 });

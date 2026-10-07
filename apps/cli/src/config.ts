@@ -2,11 +2,17 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
+import { SERVICE_ORIGIN } from '@greatping/protocol';
 import type { Manifest } from '@greatping/protocol/crypto';
 import { UsageError } from './commands/usage';
 
-// Keep this aligned with the mobile preview. Production rollout is a separate release.
-export const DEFAULT_API_URL = 'https://greatping-api-dev.ueldo343.workers.dev';
+export const DEFAULT_API_URL = SERVICE_ORIGIN;
+
+/** Local readiness only: no credential, request, or phone delivery claim. */
+export function pairingProblem(config: Config): 'unpaired' | 'environment_mismatch' | null {
+  if (!isPaired(config)) return 'unpaired';
+  return config.apiUrl === DEFAULT_API_URL ? null : 'environment_mismatch';
+}
 
 export interface Config {
   apiUrl: string;

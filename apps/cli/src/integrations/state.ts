@@ -1,4 +1,14 @@
-import { mkdirSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { LIMITS } from '@greatping/protocol';
 import { configDir } from '../config';
@@ -10,7 +20,62 @@ import { configDir } from '../config';
  * named by the opaque ids that were sent. Nothing from the prompt is stored.
  */
 
-export type HostId = 'claude' | 'codex';
+export type HostId = 'claude' | 'codex' | 'opencode' | 'pi' | 'cursor';
+
+export const ALERT_PROBLEMS = [
+  'unpaired',
+  'environment_mismatch',
+  'revoked',
+  'network',
+  'timeout',
+  'rate_limited',
+  'service',
+  'rejected',
+  'local',
+] as const;
+export type AlertProblem = (typeof ALERT_PROBLEMS)[number];
+export interface AlertAttempt {
+  at: number;
+  outcome: 'accepted' | 'failed';
+  problem: AlertProblem | null;
+}
+// Store no event payloads, server messages, credentials or session identifiers.
+const attemptPath = (host: HostId) => join(root(), `${host}.alert.json`);
+export function recordAlert(host: HostId, problem: AlertProblem | null): void {
+  const path = attemptPath(host);
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    mkdirSync(root(), { recursive: true, mode: 0o700 });
+    writeFileSync(
+      temporary,
+      JSON.stringify({ at: Date.now(), outcome: problem ? 'failed' : 'accepted', problem }),
+      { mode: 0o600 },
+    );
+    renameSync(temporary, path);
+  } catch {
+    // Diagnostics must never block or fail a host.
+  } finally {
+    try {
+      rmSync(temporary, { force: true });
+    } catch {
+      /* Best effort. */
+    }
+  }
+}
+export function lastAlert(host: HostId): AlertAttempt | null {
+  try {
+    const value = JSON.parse(readFileSync(attemptPath(host), 'utf8'));
+    if (!Number.isSafeInteger(value.at) || value.at < 0) return null;
+    if (
+      (value.outcome === 'accepted' && value.problem === null) ||
+      (value.outcome === 'failed' && ALERT_PROBLEMS.includes(value.problem))
+    )
+      return { at: value.at, outcome: value.outcome, problem: value.problem };
+  } catch {
+    /* No verified diagnostic yet. */
+  }
+  return null;
+}
 
 function root(): string {
   return join(configDir(), 'hook-state');
@@ -89,7 +154,11 @@ export function pruneAlerts(now = Date.now()): void {
         if (info.isDirectory()) {
           if (depth < 2) walk(path, depth + 1);
           if (depth > 0 && readdirSync(path).length === 0) rmSync(path, { recursive: true });
-        } else if (depth === 0 ? !name.endsWith('.seen') : now - info.mtimeMs > maxAge) {
+        } else if (
+          depth === 0
+            ? !name.endsWith('.seen') && !name.endsWith('.alert.json')
+            : now - info.mtimeMs > maxAge
+        ) {
           rmSync(path, { force: true });
         }
       } catch {
@@ -131,28 +200,37 @@ export function touchHeartbeat(host: HostId, now = Date.now()): number | null {
   return previous;
 }
 
-// `.seen` keeps it out of `pruneAlerts`, like the per-host heartbeats.
-const reportPath = () => join(root(), 'report.seen');
+// `.seen` keeps stamps out of `pruneAlerts`, like the per-host heartbeats.
+const stampPath = (name: string) => join(root(), `${name}.seen`);
 
 /**
- * Whether the hourly machine report is due. It keeps its own clock: hooks of a
- * busy session run every few minutes, so the time since the last hook never
- * reaches an hour while the computer is in use. Claims the slot when due, so
- * hooks running at once do not all report.
+ * Claims a periodic slot named `name` when `intervalMs` has passed since the
+ * last claim, so hooks running at once do not all do the same work. The
+ * `.seen` file survives pruning.
  */
-export function claimReport(intervalMs: number, now = Date.now()): boolean {
+export function claimStamp(name: string, intervalMs: number, now = Date.now()): boolean {
+  const path = stampPath(name);
   try {
-    const last = statSync(reportPath()).mtimeMs;
+    const last = statSync(path).mtimeMs;
     if (now - last < intervalMs) return false;
-    utimesSync(reportPath(), now / 1000, now / 1000);
+    utimesSync(path, now / 1000, now / 1000);
   } catch {
     try {
       mkdirSync(root(), { recursive: true, mode: 0o700 });
-      writeFileSync(reportPath(), '', { mode: 0o600 });
-      utimesSync(reportPath(), now / 1000, now / 1000);
+      writeFileSync(path, '', { mode: 0o600 });
+      utimesSync(path, now / 1000, now / 1000);
     } catch {
       return false;
     }
   }
   return true;
+}
+
+/**
+ * Whether the hourly machine report is due. It keeps its own clock: hooks of a
+ * busy session run every few minutes, so the time since the last hook never
+ * reaches an hour while the computer is in use.
+ */
+export function claimReport(intervalMs: number, now = Date.now()): boolean {
+  return claimStamp('report', intervalMs, now);
 }

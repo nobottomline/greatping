@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -112,4 +112,56 @@ test('Firebase exception is limited to its client field, path and rule', () =>
     assert.equal(result.status, 1);
     assert.match(result.stderr, /github-pat/);
     assert.ok(!result.stderr.includes(token));
+  }));
+
+test('crypto fixture exceptions match exact public values, paths and rules', () =>
+  fixture(({ root, check }) => {
+    const paths = [
+      'packages/protocol/test/vectors/rfc9180-a2-base.json',
+      'packages/protocol/test/vectors/e2e-v1.json',
+      'packages/protocol/test/e2e-vectors.test.ts',
+      'packages/protocol/test/envelope.test.ts',
+    ];
+    for (const path of paths) {
+      mkdirSync(join(root, path, '..'), { recursive: true });
+      copyFileSync(new URL(`../../${path}`, import.meta.url), join(root, path));
+    }
+    assert.equal(check('tree').status, 0);
+    const publicValue = JSON.parse(readFileSync(join(root, paths[0]), 'utf8')).vector.key;
+    writeFileSync(join(root, 'outside-vector.json'), JSON.stringify({ key: publicValue }));
+    assert.equal(check('tree').status, 1);
+    rmSync(join(root, 'outside-vector.json'));
+    // The mobile tree is private and absent from the OSS export. Generate its
+    // fixture from the same public test identifier so this gate runs in both.
+    const syntheticProject = readFileSync(join(root, paths[2]), 'utf8').match(/proj_[0-9]+/)?.[0];
+    assert.ok(syntheticProject);
+    mkdirSync(join(root, 'apps/mobile/test'), { recursive: true });
+    writeFileSync(
+      join(root, 'apps/mobile/test/content.test.ts'),
+      JSON.stringify({ key: syntheticProject }),
+    );
+    assert.equal(check('tree').status, 0);
+    writeFileSync(join(root, 'outside-project.json'), JSON.stringify({ key: syntheticProject }));
+    assert.equal(check('tree').status, 1);
+    rmSync(join(root, 'outside-project.json'));
+    writeFileSync(
+      join(root, 'apps/mobile/test/content.test.ts'),
+      JSON.stringify({ api_key: randomBytes(32).toString('hex') }),
+    );
+    assert.equal(check('tree').status, 1);
+    rmSync(join(root, 'apps/mobile/test/content.test.ts'));
+    // A different generic key in the allowed file must still be detected.
+    writeFileSync(
+      join(root, paths[0]),
+      JSON.stringify({ api_key: randomBytes(32).toString('hex') }),
+    );
+    assert.equal(check('tree').status, 1);
+    rmSync(join(root, paths[0]));
+    // Other credential rules remain active even in deterministic vector files.
+    const token = `gh${'p_'}${randomBytes(32).toString('hex').slice(0, 36)}`;
+    writeFileSync(join(root, paths[1]), JSON.stringify({ key: token }));
+    const result = check('tree');
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /github-pat/);
+    assert.ok(!`${result.stdout}${result.stderr}`.includes(token));
   }));

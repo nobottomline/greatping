@@ -34,7 +34,7 @@ The code has two halves, `ABCD-EFGH`. The first finds the pairing on the service
 - stdout carries only results: the `ask` answer, `--json` objects, `--version`. Messages, spinners and prompts go to stderr, so `answer=$(greatping ask …)` works.
 - Color is used sparingly and follows `NO_COLOR`, `FORCE_COLOR` and `--no-color`; it is off when stderr is not a terminal. Spinners and prompts appear only when stdin and stderr are terminals and `CI` is unset.
 - The terminal QR code is drawn with background colors, dark on white, so it scans on light and dark themes; without color it falls back to half blocks.
-- Exit codes: `0` success, `1` error (including "not paired" for `status`), `2` the question or pairing code ended without an answer (expired, cancelled or resolved), `130`/`143` interrupted. On those signals `ask` withdraws the question from the phone.
+- Exit codes: `0` success, `1` error (including "not paired" for `status`), `2` the question or pairing code ended without an answer (expired, cancelled or resolved), `3` an answer arrived that could not be verified (not signed by a device of the account, not for this question, or not one of its choices); the question is withdrawn and nothing is printed to stdout, `130`/`143` interrupted. On those signals `ask` withdraws the question from the phone.
 - `ask` waits on a WebSocket and checks the HTTP state after disconnects, so an answer that arrives before the connection is still observed.
 - `ask` clears its waiting line before printing the answer or final status. JSON has no spinner; narrow terminals shorten the waiting label instead of wrapping it.
 - `notify` immediately shows a sending indicator in interactive terminals and clears it before acceptance, a paused-alert warning or an error. JSON, redirected output, CI and dumb terminals have no animation. Interruption restores the terminal and returns `130`/`143`; check the app because an interrupted send may already have been accepted. Acceptance does not confirm delivery to a device.
@@ -83,9 +83,21 @@ Hooks and MCP use the verified Vite+ shim, which survives package/Node upgrades.
 Bare startup uses the saved pairing only for the next-step hint; `status` performs
 the server check. A saved credential is not presented as a verified live session.
 
-After `login`, `status`, `setup` and `doctor`, and at most hourly from hooks, the CLI reports its OS name and version, CPU architecture, CLI version and, per agent (Claude Code, Codex), whether its hooks work, whether they also alert on finished turns, whether the MCP tools and skill are installed, and when a hook last ran. Devices show this under Agents. It never sends user names, paths, addresses or hardware identifiers. A computer cannot rename itself or change which devices it alerts; that is done in the app. It can pause its own alerts.
+After `login`, `status`, `setup` and `doctor`, and at most hourly from hooks, the CLI reports its OS name and version, CPU architecture, CLI version and, per supported agent, whether its hooks work, whether they also alert on finished turns, whether the MCP tools and skill are installed, and when a hook last ran. Devices show this under Agents. It never sends user names, paths, addresses or hardware identifiers. A computer cannot rename itself or change which devices it alerts; that is done in the app. It can pause its own alerts.
 
 ## Agents
+
+CLI 0.4.0 adds native OpenCode/Pi integrations; 0.3.3 and earlier lack them.
+Use `setup opencode --yes` or `setup pi --yes`, then restart the host. Adapters,
+tools and the canonical skill are bundled in the CLI and installed locally.
+OpenCode covers native questions, permissions and completed root responses;
+Pi covers extension UI dialogs and settled responses, with five native tools.
+Both reuse the same CLI pairing and transport. Completion defaults on; use
+`--no-finished` to disable it. `doctor`, `status --json` and `setup HOST --remove`
+understand their owned packages and preserve edited files. See the
+[native adapter guide](https://github.com/nobottomline/greatping/blob/main/plugins/native-adapters.md)
+for tested host versions, source prerequisites, platform limits and distribution.
+
 
 `greatping setup` opens an interactive picker for detected agents (`setup claude`
 or `setup codex` selects one). Up/Down moves, Enter or Space toggles, and Enter on
@@ -154,10 +166,10 @@ Use `greatping doctor` to test the installed handlers and `doctor --fix` to repa
 outdated launchers. `greatping hook` (singular) is an internal event handler called
 by agents, not a command to run manually.
 
-Hooks remain the event mechanism for Claude Code and Codex. Planned native
-plugins will package that mechanism with MCP and the skill, with migration to
-one active integration owner per agent; they do not replace automatic events
-with model-directed tool calls. See **Future integration packages** below.
+Hooks remain the event mechanism for Claude Code and Codex. Preview native
+plugins package them with MCP and the skill, using the installed CLI. Migrate to
+one integration owner per host through the owning installers. See
+**Agent plugin packages** below.
 
 ## MCP tools
 
@@ -259,20 +271,55 @@ in the app. `--dry-run` never invokes a package manager or the API.
 pairing and the CLI. `greatping logout` unpairs without removing integrations.
 Both commands are distinct from full uninstall.
 
-## Future integration packages
+## Agent plugin packages
 
-Native plugin packaging will use root `plugins/{claude,codex,cursor}` and separate
-`packages/opencode-plugin` and `packages/pi-extension` packages in the public
-repository. CLI and MCP remain in `apps/cli`. Extract shared client code when
-these adapters need it, retaining one source for operations and one active owner
-for each host integration. These packages are planned, not implemented yet.
+`plugins/{claude,codex}/greatping` contain preview native packages with hooks,
+MCP and generated copies of `skills/greatping/SKILL.md`. They use this installed
+CLI (>=0.4.0 and <1.0.0) through a saved stable launcher; no hook runs `npx` or
+downloads a runtime. Pairing and client logic stay here. See the
+[plugin guide](../../plugins/README.md) for configure/check, migration and removal.
+
+CLI 0.4.0 detects native user-level plugin registrations. `greatping setup
+claude|codex` configures an installed plugin without cache-path commands or duplicate
+hooks/MCP/skills. `--migrate` preserves preferences before removing owned direct
+integrations. `doctor --fix` repairs the plugin launcher without restoring direct
+hooks; disabled plugins remain disabled. `status --json` and MCP `get_status`
+include local plugin state and conflicts. Configuration does not prove hook trust
+or delivery; Codex still requires review in `/hooks`. This onboarding requires CLI >=0.4.0. Unknown inventory schemas/scopes are reported
+conservatively; inspect the native manager rather than guessing cache paths. Remove native packages through the host manager
+before full CLI uninstall. The independent `npx skills` channel remains available.
+
+Cursor local preview and OpenCode/Pi adapters are bundled with the CLI. The
+shared client retains credentials, encrypted transport and event ownership; host
+packages delegate through stable launchers. See the host guides for coverage.
+
+## End-to-end encryption
+
+What this computer sends as content is sealed to the devices of its account:
+the text, title and choices of `ask` and `notify` (and their MCP tools), and
+project names. Each request is encrypted once, its key wrapped with HPKE
+(RFC 9180: X25519, HKDF-SHA256, ChaCha20-Poly1305) for every device in the
+account manifest this computer verified, and signed with the computer's key.
+The service stores and forwards what it cannot read; it still sees routing
+metadata: which agent, why it waits, opaque thread and project ids, times.
+
+An answer counts only if a device of the account signed it, for this very
+question, and it is one of the choices or allowed text; anything else is
+refused (exit code `3`, an MCP tool error) and the question is withdrawn.
+Renaming or hiding a project in the app reaches this computer as a signed
+command and changes its local `greatping project` settings.
+
+A computer paired before encryption has no keys: run `greatping logout`, then
+`greatping login`.
 
 ## Service and preview access
 
 The CLI connects automatically to the GreatPing service. There is no server URL
-option or environment override. The current release uses the same development
-service as the mobile preview; switching to the production domain is a separate,
-coordinated release. Install the private-test mobile app before running `login`.
+option or environment override. The built-in origin is defined once by
+`SERVICE_ORIGIN` in `@greatping/protocol` and targets the production service.
+Mobile store builds use the same origin; internal development and preview app
+profiles select their backend at build time. Use an app build targeting the same
+backend when running `login`.
 The app is not yet available in the App Store or Google Play.
 
 An existing pairing keeps its credential bound to the server that issued it.
@@ -300,3 +347,23 @@ workspace, verifies the executable and bundled skill, and runs the hook, MCP
 and PTY suites against that installation. CI builds on Node.js 24 and qualifies
 the archive on Node.js 22.20 and Node.js 24. The build uses tsdown; users of the
 installed CLI do not need tsdown or the private protocol workspace package.
+
+For contributor tests against a local Worker, use the existing transport-fake
+approach: a `node --import` preload replaces `globalThis.fetch`, asserts that the
+requested origin is `SERVICE_ORIGIN`, then rewrites only that origin to the local
+Worker before calling the original fetch with unchanged request options. See
+`test/fixtures/terminal-fetch.mjs` and the local redirect fixture in
+`test/cli.test.mjs`. Run the built CLI with
+`node --import /path/to/local-fetch.mjs dist/index.js <command>` and an isolated
+`XDG_CONFIG_HOME` containing only fixture credentials bound to `SERVICE_ORIGIN`.
+Never use real account credentials in these fixtures. This is a contributor
+transport harness; the product has no runtime server selection.
+
+
+Cursor IDE has an offline local plugin installer: `greatping setup cursor --yes`.
+Reload the IDE and inspect Customize; organization policy controls local imports.
+Only successful completion is automatically covered. See
+[Cursor integration](../../plugins/cursor.md) and
+[native alert troubleshooting](../../plugins/troubleshooting.md) for pairing
+issuer mismatch, presence delay and the distinction between service acceptance
+and phone delivery. These source changes still require a CLI release.

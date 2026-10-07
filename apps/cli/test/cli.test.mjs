@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { SERVICE_ORIGIN } from '@greatping/protocol';
 import { api } from '../src/api.ts';
 import { ask } from '../src/commands/ask.ts';
 import {
@@ -54,7 +55,7 @@ function withHome(run) {
 
 test('the service is built in; old overrides and unpaired config cannot select a host', () => {
   withHome(() => {
-    assert.equal(DEFAULT_API_URL, 'https://greatping-api-dev.ueldo343.workers.dev');
+    assert.equal(DEFAULT_API_URL, SERVICE_ORIGIN);
     assert.equal(loadConfig().apiUrl, DEFAULT_API_URL);
     saveConfig({ apiUrl: 'https://other.example/' });
     process.env.GREATPING_API_URL = 'https://override.example';
@@ -82,6 +83,41 @@ test('existing pairings keep their issuer; unrelated or missing origins cannot r
       assert.equal(loadConfig().machineToken, undefined);
     }
   });
+});
+
+test('development pairings are refused with logout/login guidance before network access', async () => {
+  const originalFetch = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests++;
+    throw new Error('Unexpected network call');
+  };
+  try {
+    let config;
+    withHome(() => {
+      // Keep the retired issuer out of published source as a literal address.
+      const apiUrl = `https://greatping-api-dev.ueldo343.${['workers', 'dev'].join('.')}`;
+      const credential = { machineId: 'dev-machine', machineToken: 'dev-token' };
+      saveConfig({ ...credential, apiUrl });
+      config = loadConfig();
+      assert.deepEqual(config, { ...credential, apiUrl });
+      assert.throws(
+        () => requireServer(config),
+        (error) => {
+          assert.match(error.message, /different or unknown GreatPing environment/);
+          assert.equal(
+            error.hint,
+            'Run greatping logout, then greatping login to pair with this version of GreatPing.',
+          );
+          return true;
+        },
+      );
+    });
+    await assert.rejects(api(config, 'GET', '/machine/me'), /different or unknown/);
+    assert.equal(requests, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('durations accept seconds, minutes and hours', () => {

@@ -226,7 +226,9 @@ export function prepareUpdateNotice(argv: string[]): () => void | Promise<void> 
     process.env.RUN_ID ||
     own.includes('--no-update-check') ||
     own.includes('--json') ||
-    ['hook', 'mcp', 'uninstall', 'update'].includes(name ?? '') ||
+    ['hook', 'mcp', 'runtime-health', 'adapter-capabilities', 'uninstall', 'update'].includes(
+      name ?? '',
+    ) ||
     !stableVersion(VERSION)
   )
     return () => {};

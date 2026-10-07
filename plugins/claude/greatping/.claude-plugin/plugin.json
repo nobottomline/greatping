@@ -1,0 +1,17 @@
+{
+  "name": "greatping",
+  "version": "0.2.0",
+  "description": "Phone alerts for native questions and permissions, with explicit GreatPing MCP tools.",
+  "author": {
+    "name": "Great Love",
+    "url": "https://greatping.com"
+  },
+  "homepage": "https://github.com/nobottomline/greatping#agent-plugins",
+  "repository": "https://github.com/nobottomline/greatping",
+  "license": "MIT",
+  "keywords": [
+    "notifications",
+    "mcp",
+    "claude"
+  ]
+}

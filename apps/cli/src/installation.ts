@@ -230,7 +230,10 @@ export async function verifyRemoval(
   )
     throw new Error('The GreatPing installation changed. Run uninstall again.');
   if (installation.manager === 'vite-plus') return;
-  const output = await managerOutput(removal.executable, removal.probe, 3000, signal);
+  // A cold package-manager process can take seconds on a busy machine. Keep
+  // the ownership probe bounded and cancellable without treating startup as
+  // proof that the manager does not own this installation.
+  const output = await managerOutput(removal.executable, removal.probe, 10000, signal);
   const actual =
     installation.manager === 'pnpm' || installation.manager === 'bun'
       ? join(output, 'greatping')

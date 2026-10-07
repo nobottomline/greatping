@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import process from 'node:process';
+import { parse as parseToml } from 'smol-toml';
 import { findOnPath, type Launcher, launcherProblem } from './launcher';
 import { forgetAsset, ownedAssets, recordAsset } from './ownership';
 import type { HostId } from './state';
@@ -24,19 +25,35 @@ export function codexConfig(): string {
 
 /** Reads `command` and `args` of `[mcp_servers.greatping]` from Codex's TOML. */
 export function codexMcpServer(toml: string): { command: string; args: string[] } | null {
-  const section = toml.match(/^\s*\[mcp_servers\.greatping\]\s*$([\s\S]*?)(?=^\s*\[|(?![\s\S]))/m);
-  if (!section?.[1]) return null;
-  const body = section[1];
-  const command = body.match(/^\s*command\s*=\s*"((?:[^"\\]|\\.)*)"/m)?.[1];
-  if (command === undefined) return { command: '', args: [] };
-  const list = body.match(/^\s*args\s*=\s*\[([\s\S]*?)\]/m)?.[1] ?? '';
-  const args = [...list.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((match) =>
-    (match[1] ?? '').replace(/\\(["\\])/g, '$1'),
-  );
-  return { command: command.replace(/\\(["\\])/g, '$1'), args };
+  try {
+    const settings = parseToml(toml);
+    const servers = settings.mcp_servers as Record<string, unknown> | undefined;
+    const server = servers?.greatping as { command?: unknown; args?: unknown } | undefined;
+    if (!server) return null;
+    return {
+      command: typeof server.command === 'string' ? server.command : '',
+      args:
+        Array.isArray(server.args) && server.args.every((arg) => typeof arg === 'string')
+          ? server.args
+          : [],
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function inspectMcp(host: HostId): McpState {
+  if (host === 'cursor') {
+    try {
+      const servers = JSON.parse(
+        readFileSync(join(homedir(), '.cursor', 'mcp.json'), 'utf8'),
+      ).mcpServers;
+      return { registered: Boolean(servers?.greatping), problem: null };
+    } catch {
+      return { registered: false, problem: null };
+    }
+  }
+  if (host === 'opencode' || host === 'pi') return { registered: false, problem: null };
   if (host === 'codex') {
     let toml: string;
     try {
@@ -49,13 +66,19 @@ export function inspectMcp(host: HostId): McpState {
     return { registered: true, problem: launcherProblem(server.command, server.args) };
   }
   try {
-    const config = JSON.parse(readFileSync(join(homedir(), '.claude.json'), 'utf8')) as {
+    const config = JSON.parse(readFileSync(claudeMcpConfig(), 'utf8')) as {
       mcpServers?: Record<string, unknown>;
     };
     return { registered: Boolean(config.mcpServers?.greatping), problem: null };
   } catch {
     return { registered: false, problem: null };
   }
+}
+
+export function claudeMcpConfig(): string {
+  return process.env.CLAUDE_CONFIG_DIR
+    ? join(process.env.CLAUDE_CONFIG_DIR, '.claude.json')
+    : join(homedir(), '.claude.json');
 }
 
 /** Registers (or re-registers) the MCP server with Codex through its own CLI. */

@@ -1,39 +1,31 @@
 import { z } from 'zod';
+import {
+  ALERT_HOSTS,
+  type AlertHost,
+  ATTENTION_REASONS,
+  type AttentionReason,
+  LIMITS,
+} from './constants';
+import {
+  CATEGORY_HINTS,
+  type CategoryHint,
+  type Envelope,
+  envelopeSchema,
+} from './crypto/envelope';
 import type { MemberKeys } from './crypto/keys';
+
+export * from './constants';
+export {
+  CATEGORY_HINTS,
+  type CategoryHint,
+  type Envelope,
+  type EnvelopePurpose,
+} from './crypto/envelope';
 
 export const PROTOCOL_VERSION = '0.1.0';
 
-export const LIMITS = {
-  pairingTtlSec: 15 * 60,
-  linkTtlSec: 10 * 60,
-  timeoutDefaultSec: 30 * 60,
-  attentionTimeoutSec: 7 * 24 * 3600,
-  ackTimeoutDefaultSec: 90,
-  reminderAfterSec: 5 * 60,
-  bodyMaxLength: 1000,
-  choicesMax: 8,
-  choiceMaxLength: 80,
-  answerTextMaxLength: 2000,
-  /** A device younger than this may only remove devices and computers added after it. */
-  removalCoolingOffSec: 72 * 3600,
-  /** Members of one account's manifest; far above any personal setup. */
-  manifestMembersMax: 100,
-  escalationWaitDefaultSec: 90,
-  escalationWaitMaxSec: 3600,
-  reminderDefaultSec: 5 * 60,
-  reminderMaxSec: 6 * 3600,
-  eventRetentionDays: 90,
-  /** A finished request keeps its text and answer this long, then only its outcome remains. */
-  historyRetentionDays: 7,
-  /** While the user is at the computer, an attention alert waits this long before it is sent. */
-  presenceDelayDefaultSec: 30,
-  presenceDelayMaxSec: 600,
-  /** Longest pause of a computer's alerts. */
-  pauseMaxSec: 7 * 24 * 3600,
-  projectLabelMaxLength: 60,
-} as const;
-
-export const USER_CODE_ALPHABET = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+/** The hosted service; the CLI and store builds use only this origin. */
+export const SERVICE_ORIGIN = 'https://api.greatping.com';
 
 // ---------------------------------------------------------------------------
 // Core types
@@ -50,30 +42,6 @@ export interface Place {
   /** Network operator, e.g. "Comcast Cable" (ASN organisation). */
   network: string | null;
 }
-
-/**
- * The agent or tool an alert comes from. Adapters map their host to one of
- * these; anything else is `other`. `cli` is the GreatPing command itself.
- */
-export const ALERT_HOSTS = [
-  'claude-code',
-  'codex',
-  'cursor',
-  'opencode',
-  'pi',
-  'gemini-cli',
-  'cli',
-  'other',
-] as const;
-export type AlertHost = (typeof ALERT_HOSTS)[number];
-
-/**
- * Why a native host needs the user. permission, question and input block the
- * agent until the user acts at the computer; finished and error mean it stopped
- * and waits for the next message.
- */
-export const ATTENTION_REASONS = ['permission', 'question', 'input', 'finished', 'error'] as const;
-export type AttentionReason = (typeof ATTENTION_REASONS)[number];
 
 /**
  * Which alerts a device wants, independent of the computer that sends them:
@@ -235,6 +203,7 @@ export interface AccountEvent {
   createdAt: number;
 }
 
+/** A decrypted answer (`answer` envelope payload). */
 export interface Answer {
   choice?: string;
   text?: string;
@@ -245,10 +214,12 @@ export type EscalationStage = 'primary' | 'all' | 'reminder' | 'done';
 
 export type RequestKind = 'attention' | 'ask' | 'notify';
 
-/** A project an alert belongs to: an opaque key of its root and the label the user allows. */
+/**
+ * A project an alert belongs to: an opaque key of its root. Its label travels
+ * only inside the envelope (docs/e2e-encryption.md).
+ */
 export interface ProjectRef {
   key: string;
-  label: string | null;
 }
 
 export interface PingRequest {
@@ -268,14 +239,18 @@ export interface PingRequest {
   /** Opaque id of the host's chat session; one open attention alert per thread. */
   thread: string | null;
   project: ProjectRef | null;
-  /** Explicit questions and messages only; attention alerts carry no text. */
-  title: string | null;
-  body: string;
-  choices: string[];
-  allowText: boolean;
+  /** Questions: which notification buttons fit, the only plaintext about the choices. */
+  hint: CategoryHint | null;
+  /**
+   * The content, sealed by the computer to the account's devices: the text of
+   * a question or message, its choices, and the project label. Null for an
+   * attention alert without a label, and once the content is erased.
+   */
+  envelope: Envelope | null;
   status: RequestStatus;
   stage: EscalationStage;
-  answer: Answer | null;
+  /** The answer, sealed by the answering device to the computer and every device. */
+  answerEnvelope: Envelope | null;
   answeredByDeviceId: string | null;
   createdAt: number;
   expiresAt: number;
@@ -286,8 +261,8 @@ export interface PingRequest {
   /** When the request stopped waiting; absent while it is pending. */
   finishedAt?: number;
   /**
-   * Title, body, choices and answer were deleted `historyRetentionDays` after
-   * the request finished; only its outcome and times remain.
+   * The envelopes were deleted `historyRetentionDays` after the request
+   * finished; only its outcome and times remain.
    */
   contentErased?: boolean;
 }
@@ -297,9 +272,20 @@ export type PushData =
       type: 'request';
       requestId: string;
       kind: RequestKind;
-      choices: string[];
-      allowText: boolean;
+      hint: CategoryHint | null;
       stage: EscalationStage;
+      /**
+       * What the server says about the request, so the iOS extension can check
+       * it against the envelope's signed fields as the app does.
+       */
+      host: AlertHost;
+      reason: AttentionReason | null;
+      projectKey: string | null;
+      createdAt: number;
+      /** The source of an alert from the command itself (`alertSource`). */
+      machineName: string;
+      /** The content for this device to open; left out when the push would be too large. */
+      envelope?: Envelope;
     }
   | { type: 'resolved'; requestId: string; status: RequestStatus }
   /** Another device opened the request; its alert can be cleared here. */
@@ -440,28 +426,32 @@ export const updateMachineBodySchema = z.object({
 export type UpdateMachineBody = z.infer<typeof updateMachineBodySchema>;
 
 /**
- * A project a computer's alerts named recently, and how the account shows it.
- * `folderLabel` is what the computer sent (its folder name or a local alias);
- * `name` replaces it in alerts and `hidden` drops it.
+ * A computer's recent projects as it last reported them: a `projects`
+ * envelope the devices open (folder names, names set from a device, hidden).
+ * The server only stores it.
  */
-export interface MachineProject {
-  key: string;
-  folderLabel: string | null;
-  name: string | null;
-  hidden: boolean;
-  lastSeenAt: number;
-}
-
 export interface ListMachineProjectsResponse {
-  projects: MachineProject[];
+  envelope: Envelope | null;
+  reportedAt: number | null;
 }
 
-/** How every device of the account shows one project of a computer. */
-export const updateMachineProjectBodySchema = z.strictObject({
-  name: z.string().trim().min(1).max(LIMITS.projectLabelMaxLength).nullable().optional(),
-  hidden: z.boolean().optional(),
-});
-export type UpdateMachineProjectBody = z.infer<typeof updateMachineProjectBodySchema>;
+/**
+ * A device renames or hides a project: a `project` envelope queued for the
+ * computer, which applies it to its own settings (docs/e2e-encryption.md).
+ */
+export const projectCommandBodySchema = z.strictObject({ envelope: envelopeSchema });
+export type ProjectCommandBody = z.infer<typeof projectCommandBodySchema>;
+
+/** Queued project commands, returned once to the computer and then deleted. */
+export interface ProjectCommandsResponse {
+  commands: Envelope[];
+}
+
+/**
+ * Sent with every request a computer creates: how many project commands wait
+ * for it, so it fetches them at once instead of with its next hourly report.
+ */
+export const PROJECT_COMMANDS_HEADER = 'x-greatping-project-commands';
 
 export const updateRouteBodySchema = z.object({
   mode: z.enum(['first', 'standard', 'backup', 'off']),
@@ -494,6 +484,8 @@ export const reportMachineBodySchema = z.object({
   ...machineDescriptionSchema,
   /** The manifest version the computer verified and uses. */
   manifestVersion: z.number().int().positive().optional(),
+  /** Its recent projects, sealed to the account's devices; replaces the previous report. */
+  projectsEnvelope: envelopeSchema.optional(),
 });
 export type ReportMachineBody = z.infer<typeof reportMachineBodySchema>;
 
@@ -752,33 +744,6 @@ export interface MachineMeResponse {
 /** Hashes and keys a computer derives locally; never raw session ids or paths. */
 const opaqueId = z.string().regex(/^[A-Za-z0-9_-]{8,64}$/, 'expected an opaque id');
 const hostSchema = z.enum(ALERT_HOSTS);
-const titleSchema = z.string().trim().min(1).max(100);
-/** A project label the user allows: a folder name or an alias, never a path. */
-const projectLabelSchema = z.string().trim().min(1).max(LIMITS.projectLabelMaxLength);
-
-/**
- * What only the computer and the account's devices need to read. Plaintext
- * (`enc: 0`) today; encrypting it per device later changes only this envelope.
- */
-const attentionContentSchema = z.strictObject({
-  enc: z.literal(0),
-  projectLabel: projectLabelSchema.optional(),
-});
-const messageContentSchema = z.strictObject({
-  enc: z.literal(0),
-  projectLabel: projectLabelSchema.optional(),
-  title: titleSchema.optional(),
-  body: z.string().trim().min(1).max(LIMITS.bodyMaxLength),
-});
-const questionContentSchema = messageContentSchema.extend({
-  choices: z
-    .array(z.string().trim().min(1).max(LIMITS.choiceMaxLength))
-    .max(LIMITS.choicesMax)
-    .refine((choices) => new Set(choices).size === choices.length, 'choices must be unique')
-    .optional(),
-  allowText: z.boolean().optional(),
-});
-
 export const createRequestBodySchema = z.discriminatedUnion('kind', [
   /**
    * A native prompt or finished turn observed by a hook. The server keeps one
@@ -793,7 +758,8 @@ export const createRequestBodySchema = z.discriminatedUnion('kind', [
     /** Identifies one prompt within the thread across retries and integrations. */
     correlation: opaqueId,
     projectKey: opaqueId.optional(),
-    content: attentionContentSchema,
+    /** Only with a project label (Folder name mode): the label is its whole content. */
+    envelope: envelopeSchema.optional(),
     timeoutSec: z.number().int().min(10).max(LIMITS.attentionTimeoutSec).optional(),
     /**
      * The computer's presence hint: true when nobody has used it for a while,
@@ -806,7 +772,8 @@ export const createRequestBodySchema = z.discriminatedUnion('kind', [
     host: hostSchema,
     thread: opaqueId.optional(),
     projectKey: opaqueId.optional(),
-    content: questionContentSchema,
+    hint: z.enum(CATEGORY_HINTS),
+    envelope: envelopeSchema,
     timeoutSec: z.number().int().min(10).max(LIMITS.attentionTimeoutSec).optional(),
     ackTimeoutSec: z.number().int().min(10).max(3600).optional(),
   }),
@@ -815,7 +782,7 @@ export const createRequestBodySchema = z.discriminatedUnion('kind', [
     host: hostSchema,
     thread: opaqueId.optional(),
     projectKey: opaqueId.optional(),
-    content: messageContentSchema,
+    envelope: envelopeSchema,
     timeoutSec: z.number().int().min(10).max(LIMITS.attentionTimeoutSec).optional(),
   }),
 ]);
@@ -877,14 +844,8 @@ export interface ListRequestsResponse {
   total?: number;
 }
 
-export const answerSchema = z
-  .object({
-    choice: z.string().max(LIMITS.choiceMaxLength).optional(),
-    text: z.string().trim().min(1).max(LIMITS.answerTextMaxLength).optional(),
-  })
-  .refine((data) => data.choice !== undefined || data.text !== undefined, {
-    message: 'either choice or text must be provided',
-  });
+/** An answer, sealed by the device (`answer` envelope); the server only relays it. */
+export const answerSchema = z.strictObject({ envelope: envelopeSchema });
 export type AnswerBody = z.infer<typeof answerSchema>;
 
 // ---------------------------------------------------------------------------
@@ -934,44 +895,78 @@ export function needsDecision(req: Pick<PingRequest, 'category'>): boolean {
   return req.category === 'decision' || req.category === 'question';
 }
 
+/**
+ * What a device read from a request's envelope that changes how it is shown.
+ * Without it (not opened, not addressed, or nothing sealed) an alert shows only
+ * what the server knows.
+ */
+export interface RequestContent {
+  title?: string;
+  body?: string;
+  projectLabel?: string;
+}
+
 /** Where an alert comes from: "Codex · billing-api", or the computer for the command itself. */
 export function alertSource(
-  req: Pick<PingRequest, 'host' | 'project' | 'machineName'>,
-  options: { withProject?: boolean } = {},
+  req: Pick<PingRequest, 'host' | 'machineName'>,
+  projectLabel?: string | null,
 ): string {
-  const label = options.withProject !== false ? req.project?.label : null;
   // The GreatPing command itself has no agent name; the computer is the source.
   const origin = req.host === 'cli' ? req.machineName || 'Computer' : HOST_NAMES[req.host];
-  return label ? `${origin} · ${label}` : origin;
+  return projectLabel ? `${origin} · ${projectLabel}` : origin;
 }
 
 /**
- * Title and body of an alert: "Codex · billing-api" and what it needs, or the
- * question or message an agent sent. Without `withProject`, the label is left
- * out (devices that hide project names in notifications).
+ * Title and body of an alert. With the opened content: "Codex · billing-api"
+ * and what it needs, or the question or message an agent sent. Without it, the
+ * generic text the server can render, which never contains content. Without
+ * `withProject`, the label is left out (devices that hide project names in
+ * notifications).
  */
 export function describeRequest(
-  req: Pick<PingRequest, 'kind' | 'host' | 'reason' | 'project' | 'title' | 'body' | 'machineName'>,
+  req: Pick<PingRequest, 'kind' | 'host' | 'reason' | 'machineName'>,
+  content?: RequestContent | null,
   options: { withProject?: boolean } = {},
 ): { title: string; body: string } {
-  const source = alertSource(req, options);
+  const label = options.withProject !== false ? content?.projectLabel : undefined;
+  const source = alertSource(req, label);
   if (req.kind === 'attention') {
     return { title: source, body: req.reason ? REASON_TEXT[req.reason] : 'Needs your attention' };
   }
-  return { title: req.title ?? source, body: req.body };
+  if (content?.body) return { title: content.title ?? source, body: content.body };
+  return {
+    title: source,
+    body: req.kind === 'ask' ? 'Has a question for you' : 'Sent you a message',
+  };
 }
 
 /**
- * The notification's buttons: Yes and No for "Yes"/"No" in any spelling, and a
- * Reply field when the question accepts the user's own words. Other choices
+ * Which buttons fit a question, computed by the computer from its choices
+ * (the server cannot read them): Yes and No for "Yes"/"No" in any spelling,
+ * and a Reply field when the question accepts the user's own words.
+ */
+export function categoryHint(choices: readonly string[], allowText: boolean): CategoryHint {
+  if (choices.length === 0) return 'text';
+  const lower = choices.map((choice) => choice.trim().toLowerCase());
+  const yesNo = lower.length === 2 && lower.includes('yes') && lower.includes('no');
+  if (yesNo) return allowText ? 'yes_no_text' : 'yes_no';
+  return allowText ? 'choices_text' : 'choices';
+}
+
+const CATEGORY_IDS: Record<CategoryHint, string> = {
+  text: 'ASK_TEXT',
+  yes_no: 'ASK_YES_NO',
+  yes_no_text: 'ASK_YES_NO_TEXT',
+  choices: 'ASK_CHOICES',
+  choices_text: 'ASK_CHOICES_TEXT',
+};
+
+/**
+ * The notification's category (its buttons). Other choices than Yes and No
  * cannot be buttons (iOS registers button titles in advance), so a tap opens
  * them in the app.
  */
-export function pickNotificationCategory(req: PingRequest): string {
+export function pickNotificationCategory(req: Pick<PingRequest, 'kind' | 'hint'>): string {
   if (req.kind !== 'ask') return 'NOTIFY';
-  if (req.choices.length === 0) return 'ASK_TEXT';
-  const lower = req.choices.map((choice) => choice.trim().toLowerCase());
-  const yesNo = lower.length === 2 && lower.includes('yes') && lower.includes('no');
-  if (yesNo) return req.allowText ? 'ASK_YES_NO_TEXT' : 'ASK_YES_NO';
-  return req.allowText ? 'ASK_CHOICES_TEXT' : 'ASK_CHOICES';
+  return CATEGORY_IDS[req.hint ?? 'text'];
 }

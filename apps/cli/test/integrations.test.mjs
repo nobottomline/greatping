@@ -48,6 +48,8 @@ import {
   pruneAlerts,
   touchHeartbeat,
 } from '../src/integrations/state.ts';
+import { reportMachine } from '../src/report.ts';
+import { openAsPhone, pairedConfig, projectCommand, stranger } from './fixtures/account.mjs';
 
 const defaultOptions = { finished: false };
 
@@ -477,6 +479,12 @@ async function fakeServer(handler) {
     });
     req.on('end', () => {
       const call = { method: req.method, path: req.url, body: body ? JSON.parse(body) : null };
+      // The computer follows the account manifest before sealing; nothing new here.
+      if (call.path.startsWith('/v1/manifests')) {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ manifests: [] }));
+        return;
+      }
       calls.push(call);
       const reply = handler(call, calls);
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -509,7 +517,7 @@ test('hook steps open, retry and resolve alerts on the server', async () => {
       return originalFetch(url.replace(DEFAULT_API_URL, server.url), options);
     };
     try {
-      const config = { apiUrl: DEFAULT_API_URL, machineId: 'm', machineToken: 't' };
+      const config = pairedConfig(DEFAULT_API_URL);
       const project = join(root, 'billing-api');
       mkdirSync(join(project, '.git'), { recursive: true });
       rememberProjectLabels('folder');
@@ -529,7 +537,9 @@ test('hook steps open, retry and resolve alerts on the server', async () => {
       assert.equal(created.body.reason, 'question');
       assert.match(created.body.thread, /^[A-Za-z0-9_-]{22}$/);
       assert.match(created.body.correlation, /^[A-Za-z0-9_-]{22}$/);
-      assert.deepEqual(created.body.content, { enc: 0, projectLabel: 'billing-api' });
+      // The label is the alert's only content, and only the account's devices read it.
+      assert.deepEqual(openAsPhone(created.body.envelope), { projectLabel: 'billing-api' });
+      assert.doesNotMatch(JSON.stringify(created.body), /billing-api/);
       assert.equal(typeof created.body.away, 'boolean');
       // Raw session and tool ids and paths stay on the computer.
       assert.doesNotMatch(JSON.stringify(created.body), /sess-uuid|toolu_secret|\//);
@@ -743,15 +753,16 @@ test('greatping run alerts once with the outcome, never the arguments, and keeps
       mkdirSync(join(root, '.config', 'greatping'), { recursive: true });
       writeFileSync(
         join(root, '.config', 'greatping', 'config.json'),
-        JSON.stringify({ apiUrl: DEFAULT_API_URL, machineId: 'm', machineToken: 't' }),
+        JSON.stringify(pairedConfig(DEFAULT_API_URL)),
       );
       const failed = await greatping('run', '--', process.execPath, '-e', 'process.exit(3)');
       assert.equal(failed.code, 3);
       const alert = server.calls.at(-1).body;
       assert.equal(alert.kind, 'notify');
       assert.equal(alert.host, 'cli');
-      assert.equal(alert.content.title, 'node failed');
-      assert.match(alert.content.body, /^Exit code 3 after \d+s\.$/);
+      const content = openAsPhone(alert.envelope);
+      assert.equal(content.title, 'node failed');
+      assert.match(content.body, /^Exit code 3 after \d+s\.$/);
       assert.doesNotMatch(JSON.stringify(alert), /process\.exit/);
 
       const quiet = server.calls.length;
@@ -763,8 +774,9 @@ test('greatping run alerts once with the outcome, never the arguments, and keeps
       const help = await greatping('run', '--title', 'Node help', '--', process.execPath, '--help');
       assert.equal(help.code, 0);
       assert.match(help.stdout, /Usage: node/);
-      assert.equal(server.calls.at(-1).body.content.title, 'Node help succeeded');
-      assert.equal(server.calls.at(-1).body.content.body.startsWith('Finished in '), true);
+      const helpContent = openAsPhone(server.calls.at(-1).body.envelope);
+      assert.equal(helpContent.title, 'Node help succeeded');
+      assert.equal(helpContent.body.startsWith('Finished in '), true);
 
       const missing = await greatping('run', '--', 'definitely-not-a-command-xyz');
       assert.equal(missing.code, 127);
@@ -808,6 +820,43 @@ test('every service answer carrying the project-label mode updates the cached mo
       assert.equal(cachedProjectLabels(), 'hidden');
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+test('the computer lists its projects sealed and applies renames a device signed', async () => {
+  await withHome(async (root) => {
+    const project = join(root, 'acme-acquisition-2026');
+    mkdirSync(join(project, '.git'), { recursive: true });
+    rememberProjectLabels('folder');
+    const { projectKey } = projectFields(project);
+    const server = await fakeServer((call) => {
+      if (call.path === '/v1/machine/me/project-commands/take')
+        return {
+          commands: [
+            // A forged command first: ignored, the real one still applies.
+            projectCommand(projectKey, { hidden: true }, stranger),
+            projectCommand(projectKey, { name: 'Client A' }),
+          ],
+        };
+      if (call.method === 'GET') return { machine: { projectLabels: 'folder' } };
+      return {};
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (url, options) =>
+      originalFetch(String(url).replace(DEFAULT_API_URL, server.url), options);
+    try {
+      await reportMachine(pairedConfig(DEFAULT_API_URL));
+      const report = server.calls.find((c) => c.method === 'PATCH');
+      assert.doesNotMatch(JSON.stringify(report.body), /acme/);
+      assert.deepEqual(openAsPhone(report.body.projectsEnvelope, 'projects'), {
+        projects: [{ key: projectKey, label: 'acme-acquisition-2026' }],
+      });
+      // The device's rename now names the project's alerts; the forgery did not hide it.
+      assert.deepEqual(projectFields(project), { projectKey, projectLabel: 'Client A' });
+    } finally {
+      globalThis.fetch = originalFetch;
+      await server.close();
     }
   });
 });

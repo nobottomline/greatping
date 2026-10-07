@@ -1,6 +1,8 @@
 import { appendFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 
+let question = null;
+
 globalThis.fetch = async (url, options = {}) => {
   const parsed = new URL(url);
   if (parsed.origin === 'https://registry.npmjs.org') {
@@ -11,7 +13,8 @@ globalThis.fetch = async (url, options = {}) => {
     if (process.env.GREATPING_TEST_NPM === 'offline') throw new Error('Fixture offline');
     return Response.json({ latest: '99.0.0' });
   }
-  if (parsed.origin !== 'https://greatping-api-dev.ueldo343.workers.dev')
+  // The PTY suite passes the built-in origin, read once by its Python driver.
+  if (parsed.origin !== process.env.GREATPING_TEST_ORIGIN)
     throw new Error('Unexpected hosted request');
   const activity = process.env.GREATPING_TEST_ACTIVITY;
   if (activity) {
@@ -27,6 +30,7 @@ globalThis.fetch = async (url, options = {}) => {
     if (activity === 'error')
       return Response.json({ error: { code: 'unauthorized' } }, { status: 401 });
   }
+  if (parsed.pathname === '/v1/manifests') return Response.json({ manifests: [] });
   if (parsed.pathname === '/v1/machine/me/pause')
     return Response.json({ alertsPausedUntil: JSON.parse(options.body).until });
   if (parsed.pathname === '/v1/machine/me/test' || parsed.pathname.startsWith('/v1/push-tests/'))
@@ -70,6 +74,7 @@ globalThis.fetch = async (url, options = {}) => {
         return Response.json({ error: { code: 'unauthorized' } }, { status: 401 });
       return Response.json({ id: 'terminal-notice', paused: mode === 'paused' });
     }
+    question = JSON.parse(options.body).envelope;
     return Response.json({
       id: 'terminal-request',
       status: 'pending',
@@ -86,7 +91,14 @@ globalThis.fetch = async (url, options = {}) => {
     return Response.json({
       id: 'terminal-request',
       status: mode,
-      ...(mode === 'answered' ? { answer: { text: 'Ship it' } } : {}),
+      // The phone's answer, sealed to this computer as the app sends it.
+      ...(mode === 'answered'
+        ? {
+            answerEnvelope: (await import('./account.mjs')).answerFor(question, {
+              text: 'Ship it',
+            }),
+          }
+        : {}),
     });
   }
   throw new Error(`Unexpected fixture route ${options.method} ${parsed.pathname}`);

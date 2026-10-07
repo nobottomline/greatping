@@ -1,6 +1,7 @@
 // Simulate a phone approving the displayed code using the real pairing protocol.
 // This preload never contacts the hosted service or bypasses key verification.
 import assert from 'node:assert/strict';
+import { SERVICE_ORIGIN } from '@greatping/protocol';
 import {
   addMember,
   createGenesis,
@@ -29,7 +30,7 @@ let start;
 let expectedTag;
 globalThis.fetch = async (url, options = {}) => {
   const parsed = new URL(url);
-  assert.equal(parsed.origin, 'https://greatping-api-dev.ueldo343.workers.dev');
+  assert.equal(parsed.origin, SERVICE_ORIGIN);
   const body = options.body ? JSON.parse(options.body) : undefined;
   if (parsed.pathname === '/v1/pair/start') {
     start = body;

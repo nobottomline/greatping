@@ -1,4 +1,4 @@
-import { PROJECT_LABELS_HEADER } from '@greatping/protocol';
+import { PROJECT_COMMANDS_HEADER, PROJECT_LABELS_HEADER } from '@greatping/protocol';
 import { type Config, requireServer } from './config';
 import { rememberProjectLabels } from './identity';
 import { VERSION } from './version';
@@ -12,6 +12,15 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+let commandsWaiting = false;
+
+/** Whether a response said that project commands wait; resets the flag. */
+export function takeCommandsWaiting(): boolean {
+  const waiting = commandsWaiting;
+  commandsWaiting = false;
+  return waiting;
 }
 
 export async function api<T>(
@@ -58,6 +67,8 @@ export async function api<T>(
   // a change made on a device applies from the next alert on.
   const mode = response.headers.get(PROJECT_LABELS_HEADER);
   if (mode === 'folder' || mode === 'hidden') rememberProjectLabels(mode);
+  // A device renamed or hid a project: the caller fetches the commands.
+  if (Number(response.headers.get(PROJECT_COMMANDS_HEADER) ?? 0) > 0) commandsWaiting = true;
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }

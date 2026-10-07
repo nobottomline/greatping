@@ -1,8 +1,9 @@
 import type { MachineMeResponse } from '@greatping/protocol';
 import { api } from './api';
 import { type Config, isPaired } from './config';
+import { sealProjects, syncProjectCommands } from './content';
 import { describeMachine } from './describe';
-import { rememberProjectLabels } from './identity';
+import { cachedProjectLabels, rememberProjectLabels } from './identity';
 import { hostIntegrations } from './integrations';
 import { followManifest } from './keys';
 import { withProgress } from './progress';
@@ -24,10 +25,16 @@ export async function reportMachine(config: Config, signal?: AbortSignal): Promi
     signal?.throwIfAborted();
     const manifest = await followManifest(config, signal);
     signal?.throwIfAborted();
+    // In Folder name mode, the recent projects, sealed, so devices can list and rename them.
+    const projectsEnvelope =
+      manifest.status === 'current' && cachedProjectLabels() === 'folder'
+        ? await sealProjects(config).catch(() => null)
+        : null;
     await api(config, 'PATCH', '/machine/me', {
       body: {
         ...currentDescription(),
         ...(manifest.status === 'current' ? { manifestVersion: manifest.version } : {}),
+        ...(projectsEnvelope ? { projectsEnvelope } : {}),
       },
       signal: signal
         ? AbortSignal.any([signal, AbortSignal.timeout(3000)])
@@ -39,6 +46,10 @@ export async function reportMachine(config: Config, signal?: AbortSignal): Promi
         : AbortSignal.timeout(3000),
     });
     rememberProjectLabels(me.machine.projectLabels);
+    await syncProjectCommands(
+      config,
+      signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : undefined,
+    );
   } catch {
     // The description is informational; it must never fail a command.
   }

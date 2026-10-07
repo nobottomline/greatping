@@ -6,26 +6,23 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import test from 'node:test';
 import { DEFAULT_API_URL } from '../src/config.ts';
+import { openAsPhone, pairedConfig } from './fixtures/account.mjs';
 
 async function session(mode, run, paired = true) {
   const root = mkdtempSync(join(tmpdir(), 'greatping-mcp-'));
   const cfg = join(root, '.config', 'greatping');
   mkdirSync(cfg, { recursive: true });
   const config = join(cfg, 'config.json');
-  if (paired)
-    writeFileSync(
-      config,
-      JSON.stringify({
-        apiUrl: DEFAULT_API_URL,
-        machineId: 'test-machine',
-        machineToken: 'PRIVATE TOKEN',
-      }),
-    );
+  if (paired) writeFileSync(config, JSON.stringify(pairedConfig(DEFAULT_API_URL)));
   const before = paired ? readFileSync(config, 'utf8') : null;
   const log = join(root, 'calls.jsonl');
   const child = spawn(
     process.execPath,
     [
+      '--experimental-transform-types',
+      '--no-warnings',
+      '--import',
+      new URL('./ts-resolve.mjs', import.meta.url).pathname,
       '--import',
       new URL('./fixtures/operations-fetch.mjs', import.meta.url).pathname,
       process.env.GREATPING_TEST_CLI ?? new URL('../dist/index.js', import.meta.url).pathname,
@@ -102,6 +99,9 @@ async function session(mode, run, paired = true) {
     rmSync(root, { recursive: true, force: true });
   }
 }
+/** The request bodies the server received; manifest checks are left out. */
+const created = (calls) => calls().filter((c) => c.path === '/v1/requests');
+
 const call = async (request, name, args = {}) => {
   const response = await request('tools/call', { name, arguments: args }).promise;
   assert.equal(response.error, undefined, JSON.stringify(response));
@@ -167,9 +167,12 @@ test('MCP notify returns accepted/paused and supports titles without claiming de
         requestId: 'test-request',
         status: mode === 'paused' ? 'paused' : 'accepted',
       });
-      assert.equal(calls()[0].body.kind, 'notify');
-      assert.equal(calls()[0].body.host, 'codex');
-      assert.equal(calls()[0].body.content.title, 'CI');
+      const [sent] = created(calls);
+      assert.equal(sent.body.kind, 'notify');
+      assert.equal(sent.body.host, 'codex');
+      // Only the account's devices can read what was sent.
+      assert.doesNotMatch(JSON.stringify(sent.body), /Build complete|"CI"/);
+      assert.deepEqual(openAsPhone(sent.body.envelope), { body: 'Build complete', title: 'CI' });
       assert.doesNotMatch(result.content[0].text, /delivered|Notification sent/);
     });
 });
@@ -195,10 +198,13 @@ test('MCP questions distinguish answers and expiry and accept comma-bearing choi
       });
       assert.equal(result.structuredContent.status, mode);
       assert.equal(result.structuredContent.requestId, 'test-request');
-      assert.deepEqual(calls()[0].body.content.choices, ['Yes, continue', 'No']);
+      const [sent] = created(calls);
+      const content = openAsPhone(sent.body.envelope);
+      assert.deepEqual(content.choices, ['Yes, continue', 'No']);
       // Choices are suggestions for an agent: own words are allowed unless it says otherwise.
-      assert.equal(calls()[0].body.content.allowText, true);
-      assert.equal(calls()[0].body.host, 'codex');
+      assert.equal(content.allowText, true);
+      assert.equal(sent.body.hint, 'choices_text');
+      assert.equal(sent.body.host, 'codex');
       assert.equal(Boolean(result.isError), mode === 'expired');
     });
 });
@@ -211,9 +217,13 @@ test('MCP strict questions and free-text questions send no own-words flag', asyn
       timeoutSeconds: 10,
     });
     await call(request, 'ask_user', { question: 'Which region?', timeoutSeconds: 10 });
-    const created = calls().filter((c) => c.path === '/v1/requests');
-    assert.equal(created.length, 2);
-    for (const { body } of created) assert.equal(body.content.allowText, undefined);
+    const sent = created(calls);
+    assert.equal(sent.length, 2);
+    for (const { body } of sent) assert.equal(openAsPhone(body.envelope).allowText, undefined);
+    assert.deepEqual(
+      sent.map(({ body }) => body.hint),
+      ['yes_no', 'text'],
+    );
   });
 });
 test('MCP cancellation during creation withdraws the question once its ID arrives', async () => {
@@ -222,17 +232,28 @@ test('MCP cancellation during creation withdraws the question once its ID arrive
       name: 'ask_user',
       arguments: { question: 'Continue?' },
     });
-    while (calls().length === 0) await new Promise((resolve) => setTimeout(resolve, 10));
+    while (created(calls).length === 0) await new Promise((resolve) => setTimeout(resolve, 10));
     notify('notifications/cancelled', { requestId: pending.id, reason: 'User cancelled' });
     // SDK versions may suppress the cancelled response; the server withdrawal
     // is the required externally observable outcome.
     const response = pending.promise.catch(() => null);
     await new Promise((resolve) => setTimeout(resolve, 500));
     assert.deepEqual(
-      calls().map((c) => c.path),
+      calls()
+        .map((c) => c.path)
+        .filter((path) => path !== '/v1/manifests'),
       ['/v1/requests', '/v1/requests/test-request/cancel'],
     );
     await response;
+  });
+});
+test('MCP refuses an answer the account did not sign and withdraws the question', async () => {
+  await session('forged', async ({ request, calls }) => {
+    const result = await call(request, 'ask_user', { question: 'Deploy?', timeoutSeconds: 10 });
+    assert.equal(result.isError, true);
+    assert.match(JSON.stringify(result), /could not be verified/);
+    assert.doesNotMatch(JSON.stringify(result.structuredContent), /"answer"/);
+    assert.ok(calls().some((c) => c.path === '/v1/requests/test-request/cancel'));
   });
 });
 test('MCP failures have a structured error without leaking the credential', async () => {

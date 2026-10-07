@@ -1,8 +1,14 @@
 import type { MachineMeResponse } from '@greatping/protocol';
 import { ApiError } from '../api';
-import { type Config, isPaired, loadConfig } from '../config';
+import { type Config, isPaired, loadConfig, pairingProblem } from '../config';
 import { clock } from '../duration';
-import { HOST_IDS, hostIntegrations, inspectHost } from '../integrations';
+import {
+  HOST_IDS,
+  hostIntegrations,
+  inspectHost,
+  pluginDiagnostics,
+  toHostIntegration,
+} from '../integrations';
 import { HOSTS } from '../integrations/host-hooks';
 import { readMachine } from '../operations';
 import { reportMachine } from '../report';
@@ -11,20 +17,21 @@ import { hostSummary } from './setup';
 
 export async function status(options: { json?: boolean }): Promise<number> {
   const config = loadConfig();
-  const claudeReport = inspectHost('claude');
+  const claudeReport = inspectHost('claude', true);
   // Kept for scripts written against earlier versions; `integrations` has the detail.
   const claude =
-    claudeReport.hooks.status !== 'off'
+    toHostIntegration(claudeReport).hooks !== 'off'
       ? 'installed'
       : claudeReport.detected
         ? 'not-installed'
         : 'not-detected';
-  const integrations = hostIntegrations();
+  const integrations = hostIntegrations(true);
+  const plugins = pluginDiagnostics(true);
 
   if (!isPaired(config)) {
     if (options.json) {
       process.stdout.write(
-        `${JSON.stringify({ paired: false, server: config.apiUrl, claudeHooks: claude, integrations })}\n`,
+        `${JSON.stringify({ paired: false, server: config.apiUrl, pairingProblem: pairingProblem(config), claudeHooks: claude, integrations, plugins })}\n`,
       );
     } else {
       ui.heading('Status');
@@ -81,13 +88,17 @@ export async function status(options: { json?: boolean }): Promise<number> {
     process.stdout.write(
       `${JSON.stringify({
         paired: true,
+        pairingProblem: pairingProblem(config),
         server: config.apiUrl,
         machine: me?.machine ?? { id: config.machineId },
         devices: me?.devices.map((d) => ({ name: d.name, type: d.type, mode: d.mode })) ?? null,
         alertsPausedUntil: me?.machine.alertsPausedUntil ?? null,
         claudeHooks: claude,
         integrations,
+        plugins,
         keys: config.keys && config.manifest ? { manifestVersion: config.manifest.version } : null,
+        // Questions, messages, project names and answers are sealed end to end.
+        encryption: config.keys && config.manifest ? 'end-to-end' : null,
         error: problem,
       })}\n`,
     );
@@ -139,5 +150,5 @@ export async function status(options: { json?: boolean }): Promise<number> {
 function keysSummary(config: Config): string {
   if (!config.keys || !config.manifest)
     return `${color.yellow('none')} ${muted('— paired before keys; greatping logout, then greatping login')}`;
-  return `verified ${muted(`(account manifest v${config.manifest.version})`)}`;
+  return `verified, alerts end-to-end encrypted ${muted(`(account manifest v${config.manifest.version})`)}`;
 }

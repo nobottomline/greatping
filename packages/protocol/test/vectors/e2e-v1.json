@@ -1,0 +1,644 @@
+{
+  "description": "GreatPing envelope v1 vectors (docs/e2e-encryption.md). Each case opens `envelope` as `recipient` with that member's X25519 secret, the members listed (the extension state) and the server-visible expectation; the result is `payload` or the error `code`.",
+  "suite": "gp-e2e-1",
+  "accountId": "acc_vectors",
+  "manifestVersion": 3,
+  "members": [
+    {
+      "id": "dev_phone",
+      "kind": "device",
+      "sign": "l3RGkxWiOgK7yMV_xNZvI3M7cRnYcNtL1q-TwFf_8tM",
+      "enc": "VtLV_8wNW9mVM5Jb_2sqyK8j72RIae8R43f8bOPMhRo"
+    },
+    {
+      "id": "dev_tablet",
+      "kind": "device",
+      "sign": "s2oY4ZDMPxDYtYXjJGLwcFMAmtGxRzYUEuLN_th3DLA",
+      "enc": "SID2izDO4KUr3bN-FscwUfHCvkDrMb970pkV4GV4EQw"
+    },
+    {
+      "id": "mch_mac",
+      "kind": "computer",
+      "sign": "BkOzMP8Hjc-0DnLUoJ3Gc68ae9A2zRn8xMJLJM2Yu4s",
+      "enc": "YPP9VYwcmD2rIQLHT-SPKzpjnhjlao5DSua8Z4T8Nn8"
+    }
+  ],
+  "secrets": {
+    "dev_phone": {
+      "enc": "5e1e029597cd46c36838e5bc1716c7cec4f888ddaba1e2ec81f4e9c227bee674",
+      "sign": "4196935ae7bf3f9ed15eabf1094ce0d6ba5274b88659c34e72f45e22b0258b70"
+    },
+    "dev_tablet": {
+      "enc": "6ed634d16a733f6f6b7277139c5d48e12f6c4196de3ccb8d7c211fa604973c84",
+      "sign": "8359e0dd4076dd064a9087fa4da846a58f458c1abf575e6e9be7ebb3b10bc5f4"
+    },
+    "mch_mac": {
+      "enc": "d628d85a0117de69f8741ad8e155882058c12a997d254ff2b65c36ffdbf20ec2",
+      "sign": "c51b6667af206fb5429ba69e2641bc8b243cd2f02ab654995391bb6fa62e4c3a"
+    }
+  },
+  "transcript": {
+    "case": "question",
+    "M": "0361736b0b636c617564652d636f646500000b7965735f6e6f5f74657874",
+    "C": "99a711e09eb92a6347af06e8d88ae69191d939c627b82ef0be47689653150176",
+    "R": "4b372122306dd407c6ccab513add5a7344dd8b556dfac6e851ef4feb91609147",
+    "signed": "14477265617450696e6720653265207631207369672099a711e09eb92a6347af06e8d88ae69191d939c627b82ef0be47689653150176204b372122306dd407c6ccab513add5a7344dd8b556dfac6e851ef4feb9160914720b918ba7fdc4b99485e31512a6dcfde9fb5bae1d27790ce858e64cc24023dccd9"
+  },
+  "cases": [
+    {
+      "name": "question",
+      "recipient": "dev_phone",
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-1",
+        "id": "sds391sUQqpOS_2SvpNCMw",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "nIYPwsFjbh7fDzo_A48XcXX5k3UPfPOyA7Q7jDUc3jE",
+            "key": "Mc0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "nG_6P7GwmH5HF8zVyWwmPqGDiMYz04xChJcxysro3Q0",
+            "key": "GKAc4w7rVLweMTnq_S3KzE11CMBCFDCqI24QgAeCDNg9ofK5OSFI_EBPKA1tPL15"
+          }
+        ],
+        "ct": "IGMxtI3xkpdlx9kAV7Z85XE1eNNI52qqEOMkqAjqMJ6jJPMo-7QOwHswWMkNJCyixpO_crr6ztWa7KlkhmoTUz3owE4r2rvT18Bh2ctZxUP9306Q07i1sOVYGZUIrSqhTMt1vqZVkEEsCsTOjX6yfQ",
+        "sig": "TbCbB7FNlAhot40wiwAkN_4YF_oOOfs8ND5BQ9o_zD2X1rrvEuptsguO5nJrSH0yFcK5iOn06Xz3bJTAqFNgDw"
+      },
+      "expect": {
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "createdAt": 1790864000000
+      },
+      "payload": {
+        "title": "Deploy",
+        "body": "Ship build 42 to production?",
+        "choices": [
+          "Yes",
+          "No"
+        ],
+        "allowText": true
+      }
+    },
+    {
+      "name": "question, second device",
+      "recipient": "dev_tablet",
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-1",
+        "id": "sds391sUQqpOS_2SvpNCMw",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "nIYPwsFjbh7fDzo_A48XcXX5k3UPfPOyA7Q7jDUc3jE",
+            "key": "Mc0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "nG_6P7GwmH5HF8zVyWwmPqGDiMYz04xChJcxysro3Q0",
+            "key": "GKAc4w7rVLweMTnq_S3KzE11CMBCFDCqI24QgAeCDNg9ofK5OSFI_EBPKA1tPL15"
+          }
+        ],
+        "ct": "IGMxtI3xkpdlx9kAV7Z85XE1eNNI52qqEOMkqAjqMJ6jJPMo-7QOwHswWMkNJCyixpO_crr6ztWa7KlkhmoTUz3owE4r2rvT18Bh2ctZxUP9306Q07i1sOVYGZUIrSqhTMt1vqZVkEEsCsTOjX6yfQ",
+        "sig": "TbCbB7FNlAhot40wiwAkN_4YF_oOOfs8ND5BQ9o_zD2X1rrvEuptsguO5nJrSH0yFcK5iOn06Xz3bJTAqFNgDw"
+      },
+      "expect": {
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "createdAt": 1790864000000
+      },
+      "payload": {
+        "title": "Deploy",
+        "body": "Ship build 42 to production?",
+        "choices": [
+          "Yes",
+          "No"
+        ],
+        "allowText": true
+      }
+    },
+    {
+      "name": "attention with project label",
+      "recipient": "dev_phone",
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-1",
+        "id": "YuKbReYXk7CwcRp2wDRBBw",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "attention",
+          "host": "codex",
+          "reason": "finished",
+          "projectKey": "proj_0123456789"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "Uus5ZOgaE-OFeS0zCrrTdsvUhfmuzmxJ3caektvCTx8",
+            "key": "2-_eg4OTJjmUKliJlXmGIbve5HPRpfcx9u-DjgnVYVvHAa1M76L2fNRwXtOdNovh"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "1nR666LFKyzKO8n9BlCMkLUsLdnar1qH_3cMObBvmFI",
+            "key": "1R0uyaVTnYL9LeELsO1mPr0OauY-2FULetm09gOCKlrorKrxsqVB2Hx0msPeTq6C"
+          }
+        ],
+        "ct": "ArV10pKnPcOzqC7pG8Eq0APpW5f17m1Asgu8_fWlCW5RtI1TI9ryIjSolgxM_A",
+        "sig": "HC0TRTkI99ubSpw6C1BsS9N-O54-d4k7jvBwmRdSQmM7-bdmkk92Gym6btE5ywmIxQIQXCJ3e8yuA2cTD9yiAg"
+      },
+      "expect": {
+        "meta": {
+          "kind": "attention",
+          "host": "codex",
+          "reason": "finished",
+          "projectKey": "proj_0123456789"
+        },
+        "createdAt": 1790864000000
+      },
+      "payload": {
+        "projectLabel": "billing-api"
+      }
+    },
+    {
+      "name": "message with non-ASCII text",
+      "recipient": "dev_tablet",
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-1",
+        "id": "FOqoaX9jWeEMCdQmEyVSjA",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "notify",
+          "host": "cli"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "yw5ySotPzrQui4lQuHxzgdt2UDAvMZsBfn39Ztq1KzU",
+            "key": "kKsygZthzFPahv9c9-W9c8cf1OsbthHuWWyaRBAwNOo58Ysh8GTikWN6-n7gVjNX"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "wVJttH56n97biPf8AARjToaEs7Fhx9F_A5MJMDClZyY",
+            "key": "pZWz17L2mQW-FgW4XNaEEURcVm4-zSEJKJ676NfefPKFxoIGEq2cFuul5tn4_Te8"
+          }
+        ],
+        "ct": "_pOetxP22T_PU-lPDoWwscfgs_0I0NBdCfVnP92s7zx8y_QkezLYCjynuWCp5FUxVZ1LFywqZtlKR8eM4TvByQbRryL2U-T3nk_Hp3ruvKX9xzvOs8tJ1W2RdwPu3J1ssw",
+        "sig": "cNDjRyALIQvYUGVYZjz0Z6Cq-6XGkoi3tjvpSTb8Yowl-17OdrdXuwJW6p8MSMQV077dNNInLjCF18B-dJfZCg"
+      },
+      "expect": {
+        "meta": {
+          "kind": "notify",
+          "host": "cli"
+        },
+        "createdAt": 1790864000000
+      },
+      "payload": {
+        "title": "Готово 🚀",
+        "body": "Сборка прошла. 构建成功。"
+      }
+    },
+    {
+      "name": "changed ciphertext",
+      "recipient": "dev_phone",
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-1",
+        "id": "sds391sUQqpOS_2SvpNCMw",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "nIYPwsFjbh7fDzo_A48XcXX5k3UPfPOyA7Q7jDUc3jE",
+            "key": "Mc0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "nG_6P7GwmH5HF8zVyWwmPqGDiMYz04xChJcxysro3Q0",
+            "key": "GKAc4w7rVLweMTnq_S3KzE11CMBCFDCqI24QgAeCDNg9ofK5OSFI_EBPKA1tPL15"
+          }
+        ],
+        "ct": "IWMxtI3xkpdlx9kAV7Z85XE1eNNI52qqEOMkqAjqMJ6jJPMo-7QOwHswWMkNJCyixpO_crr6ztWa7KlkhmoTUz3owE4r2rvT18Bh2ctZxUP9306Q07i1sOVYGZUIrSqhTMt1vqZVkEEsCsTOjX6yfQ",
+        "sig": "TbCbB7FNlAhot40wiwAkN_4YF_oOOfs8ND5BQ9o_zD2X1rrvEuptsguO5nJrSH0yFcK5iOn06Xz3bJTAqFNgDw"
+      },
+      "expect": {
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "createdAt": 1790864000000
+      },
+      "error": "bad_signature"
+    },
+    {
+      "name": "changed wrapped key",
+      "recipient": "dev_phone",
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-1",
+        "id": "sds391sUQqpOS_2SvpNCMw",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "nIYPwsFjbh7fDzo_A48XcXX5k3UPfPOyA7Q7jDUc3jE",
+            "key": "MM0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "nG_6P7GwmH5HF8zVyWwmPqGDiMYz04xChJcxysro3Q0",
+            "key": "GKAc4w7rVLweMTnq_S3KzE11CMBCFDCqI24QgAeCDNg9ofK5OSFI_EBPKA1tPL15"
+          }
+        ],
+        "ct": "IGMxtI3xkpdlx9kAV7Z85XE1eNNI52qqEOMkqAjqMJ6jJPMo-7QOwHswWMkNJCyixpO_crr6ztWa7KlkhmoTUz3owE4r2rvT18Bh2ctZxUP9306Q07i1sOVYGZUIrSqhTMt1vqZVkEEsCsTOjX6yfQ",
+        "sig": "TbCbB7FNlAhot40wiwAkN_4YF_oOOfs8ND5BQ9o_zD2X1rrvEuptsguO5nJrSH0yFcK5iOn06Xz3bJTAqFNgDw"
+      },
+      "expect": {
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "createdAt": 1790864000000
+      },
+      "error": "bad_signature"
+    },
+    {
+      "name": "changed signed metadata",
+      "recipient": "dev_phone",
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-1",
+        "id": "sds391sUQqpOS_2SvpNCMw",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "nIYPwsFjbh7fDzo_A48XcXX5k3UPfPOyA7Q7jDUc3jE",
+            "key": "Mc0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "nG_6P7GwmH5HF8zVyWwmPqGDiMYz04xChJcxysro3Q0",
+            "key": "GKAc4w7rVLweMTnq_S3KzE11CMBCFDCqI24QgAeCDNg9ofK5OSFI_EBPKA1tPL15"
+          }
+        ],
+        "ct": "IGMxtI3xkpdlx9kAV7Z85XE1eNNI52qqEOMkqAjqMJ6jJPMo-7QOwHswWMkNJCyixpO_crr6ztWa7KlkhmoTUz3owE4r2rvT18Bh2ctZxUP9306Q07i1sOVYGZUIrSqhTMt1vqZVkEEsCsTOjX6yfQ",
+        "sig": "TbCbB7FNlAhot40wiwAkN_4YF_oOOfs8ND5BQ9o_zD2X1rrvEuptsguO5nJrSH0yFcK5iOn06Xz3bJTAqFNgDw"
+      },
+      "expect": {
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no"
+        },
+        "createdAt": 1790864000000
+      },
+      "error": "bad_signature"
+    },
+    {
+      "name": "server metadata differs",
+      "recipient": "dev_phone",
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-1",
+        "id": "sds391sUQqpOS_2SvpNCMw",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "nIYPwsFjbh7fDzo_A48XcXX5k3UPfPOyA7Q7jDUc3jE",
+            "key": "Mc0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "nG_6P7GwmH5HF8zVyWwmPqGDiMYz04xChJcxysro3Q0",
+            "key": "GKAc4w7rVLweMTnq_S3KzE11CMBCFDCqI24QgAeCDNg9ofK5OSFI_EBPKA1tPL15"
+          }
+        ],
+        "ct": "IGMxtI3xkpdlx9kAV7Z85XE1eNNI52qqEOMkqAjqMJ6jJPMo-7QOwHswWMkNJCyixpO_crr6ztWa7KlkhmoTUz3owE4r2rvT18Bh2ctZxUP9306Q07i1sOVYGZUIrSqhTMt1vqZVkEEsCsTOjX6yfQ",
+        "sig": "TbCbB7FNlAhot40wiwAkN_4YF_oOOfs8ND5BQ9o_zD2X1rrvEuptsguO5nJrSH0yFcK5iOn06Xz3bJTAqFNgDw"
+      },
+      "expect": {
+        "meta": {
+          "kind": "notify",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "createdAt": 1790864000000
+      },
+      "error": "mismatch"
+    },
+    {
+      "name": "sender clock too far from the server",
+      "recipient": "dev_phone",
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-1",
+        "id": "sds391sUQqpOS_2SvpNCMw",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "nIYPwsFjbh7fDzo_A48XcXX5k3UPfPOyA7Q7jDUc3jE",
+            "key": "Mc0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "nG_6P7GwmH5HF8zVyWwmPqGDiMYz04xChJcxysro3Q0",
+            "key": "GKAc4w7rVLweMTnq_S3KzE11CMBCFDCqI24QgAeCDNg9ofK5OSFI_EBPKA1tPL15"
+          }
+        ],
+        "ct": "IGMxtI3xkpdlx9kAV7Z85XE1eNNI52qqEOMkqAjqMJ6jJPMo-7QOwHswWMkNJCyixpO_crr6ztWa7KlkhmoTUz3owE4r2rvT18Bh2ctZxUP9306Q07i1sOVYGZUIrSqhTMt1vqZVkEEsCsTOjX6yfQ",
+        "sig": "TbCbB7FNlAhot40wiwAkN_4YF_oOOfs8ND5BQ9o_zD2X1rrvEuptsguO5nJrSH0yFcK5iOn06Xz3bJTAqFNgDw"
+      },
+      "expect": {
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "createdAt": 1790864660000
+      },
+      "error": "mismatch"
+    },
+    {
+      "name": "not addressed",
+      "recipient": "mch_mac",
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-1",
+        "id": "sds391sUQqpOS_2SvpNCMw",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "nIYPwsFjbh7fDzo_A48XcXX5k3UPfPOyA7Q7jDUc3jE",
+            "key": "Mc0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "nG_6P7GwmH5HF8zVyWwmPqGDiMYz04xChJcxysro3Q0",
+            "key": "GKAc4w7rVLweMTnq_S3KzE11CMBCFDCqI24QgAeCDNg9ofK5OSFI_EBPKA1tPL15"
+          }
+        ],
+        "ct": "IGMxtI3xkpdlx9kAV7Z85XE1eNNI52qqEOMkqAjqMJ6jJPMo-7QOwHswWMkNJCyixpO_crr6ztWa7KlkhmoTUz3owE4r2rvT18Bh2ctZxUP9306Q07i1sOVYGZUIrSqhTMt1vqZVkEEsCsTOjX6yfQ",
+        "sig": "TbCbB7FNlAhot40wiwAkN_4YF_oOOfs8ND5BQ9o_zD2X1rrvEuptsguO5nJrSH0yFcK5iOn06Xz3bJTAqFNgDw"
+      },
+      "expect": {
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "createdAt": 1790864000000
+      },
+      "error": "not_addressed"
+    },
+    {
+      "name": "sender removed",
+      "recipient": "dev_phone",
+      "members": [
+        {
+          "id": "dev_phone",
+          "kind": "device",
+          "sign": "l3RGkxWiOgK7yMV_xNZvI3M7cRnYcNtL1q-TwFf_8tM",
+          "enc": "VtLV_8wNW9mVM5Jb_2sqyK8j72RIae8R43f8bOPMhRo"
+        },
+        {
+          "id": "dev_tablet",
+          "kind": "device",
+          "sign": "s2oY4ZDMPxDYtYXjJGLwcFMAmtGxRzYUEuLN_th3DLA",
+          "enc": "SID2izDO4KUr3bN-FscwUfHCvkDrMb970pkV4GV4EQw"
+        }
+      ],
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-1",
+        "id": "sds391sUQqpOS_2SvpNCMw",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "nIYPwsFjbh7fDzo_A48XcXX5k3UPfPOyA7Q7jDUc3jE",
+            "key": "Mc0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "nG_6P7GwmH5HF8zVyWwmPqGDiMYz04xChJcxysro3Q0",
+            "key": "GKAc4w7rVLweMTnq_S3KzE11CMBCFDCqI24QgAeCDNg9ofK5OSFI_EBPKA1tPL15"
+          }
+        ],
+        "ct": "IGMxtI3xkpdlx9kAV7Z85XE1eNNI52qqEOMkqAjqMJ6jJPMo-7QOwHswWMkNJCyixpO_crr6ztWa7KlkhmoTUz3owE4r2rvT18Bh2ctZxUP9306Q07i1sOVYGZUIrSqhTMt1vqZVkEEsCsTOjX6yfQ",
+        "sig": "TbCbB7FNlAhot40wiwAkN_4YF_oOOfs8ND5BQ9o_zD2X1rrvEuptsguO5nJrSH0yFcK5iOn06Xz3bJTAqFNgDw"
+      },
+      "expect": {
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "createdAt": 1790864000000
+      },
+      "error": "unknown_sender"
+    },
+    {
+      "name": "unknown suite",
+      "recipient": "dev_phone",
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-2",
+        "id": "sds391sUQqpOS_2SvpNCMw",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "nIYPwsFjbh7fDzo_A48XcXX5k3UPfPOyA7Q7jDUc3jE",
+            "key": "Mc0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "nG_6P7GwmH5HF8zVyWwmPqGDiMYz04xChJcxysro3Q0",
+            "key": "GKAc4w7rVLweMTnq_S3KzE11CMBCFDCqI24QgAeCDNg9ofK5OSFI_EBPKA1tPL15"
+          }
+        ],
+        "ct": "IGMxtI3xkpdlx9kAV7Z85XE1eNNI52qqEOMkqAjqMJ6jJPMo-7QOwHswWMkNJCyixpO_crr6ztWa7KlkhmoTUz3owE4r2rvT18Bh2ctZxUP9306Q07i1sOVYGZUIrSqhTMt1vqZVkEEsCsTOjX6yfQ",
+        "sig": "TbCbB7FNlAhot40wiwAkN_4YF_oOOfs8ND5BQ9o_zD2X1rrvEuptsguO5nJrSH0yFcK5iOn06Xz3bJTAqFNgDw"
+      },
+      "expect": {
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "createdAt": 1790864000000
+      },
+      "error": "unsupported"
+    },
+    {
+      "name": "unknown field",
+      "recipient": "dev_phone",
+      "envelope": {
+        "v": 1,
+        "suite": "gp-e2e-1",
+        "id": "sds391sUQqpOS_2SvpNCMw",
+        "purpose": "request",
+        "sender": "mch_mac",
+        "manifest": 3,
+        "at": 1790864000000,
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "recipients": [
+          {
+            "id": "dev_phone",
+            "kid": "kojUPsbF92BMVfL1rRZrrw",
+            "enc": "nIYPwsFjbh7fDzo_A48XcXX5k3UPfPOyA7Q7jDUc3jE",
+            "key": "Mc0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F"
+          },
+          {
+            "id": "dev_tablet",
+            "kid": "eJSSqZ9GgDxSjgH9_8sjnA",
+            "enc": "nG_6P7GwmH5HF8zVyWwmPqGDiMYz04xChJcxysro3Q0",
+            "key": "GKAc4w7rVLweMTnq_S3KzE11CMBCFDCqI24QgAeCDNg9ofK5OSFI_EBPKA1tPL15"
+          }
+        ],
+        "ct": "IGMxtI3xkpdlx9kAV7Z85XE1eNNI52qqEOMkqAjqMJ6jJPMo-7QOwHswWMkNJCyixpO_crr6ztWa7KlkhmoTUz3owE4r2rvT18Bh2ctZxUP9306Q07i1sOVYGZUIrSqhTMt1vqZVkEEsCsTOjX6yfQ",
+        "sig": "TbCbB7FNlAhot40wiwAkN_4YF_oOOfs8ND5BQ9o_zD2X1rrvEuptsguO5nJrSH0yFcK5iOn06Xz3bJTAqFNgDw",
+        "note": "x"
+      },
+      "expect": {
+        "meta": {
+          "kind": "ask",
+          "host": "claude-code",
+          "hint": "yes_no_text"
+        },
+        "createdAt": 1790864000000
+      },
+      "error": "malformed"
+    }
+  ]
+}

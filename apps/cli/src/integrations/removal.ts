@@ -1,6 +1,4 @@
 import { existsSync, lstatSync, readdirSync, readFileSync, rmSync } from 'node:fs';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { HOSTS, inspectHooks, uninstallHooks } from './host-hooks';
 import { readJson, writeJson } from './json-file';
 import {
@@ -9,7 +7,19 @@ import {
   managedSkillInstalled,
   removeManagedSkill,
 } from './managed-skills';
-import { codexConfig, codexMcpServer, mcpInvocationOwned, unregisterCodexMcp } from './mcp';
+import {
+  claudeMcpConfig,
+  codexConfig,
+  codexMcpServer,
+  mcpInvocationOwned,
+  unregisterCodexMcp,
+} from './mcp';
+import {
+  adapterPath,
+  inspectNativeAdapter,
+  nativeHost,
+  removeNativeAdapter,
+} from './native-adapters';
 import { fingerprint, forgetAsset, ownedAssets } from './ownership';
 import { checkSkillRemoval, skillDir, skillInstalled, uninstallSkill } from './skill';
 import type { HostId } from './state';
@@ -31,6 +41,15 @@ export function integrationRemoval(ids: HostId[], full = false): RemovalAction[]
   const actions: RemovalAction[] = [];
   const assets = ownedAssets();
   for (const id of ids) {
+    if (nativeHost(id)) {
+      if (inspectNativeAdapter(id).status !== 'absent' || existsSync(adapterPath(id)))
+        actions.push({
+          id: `adapter:${id}`,
+          label: `Remove GreatPing native adapter from ${HOSTS[id].name}`,
+          run: () => removeNativeAdapter(id),
+        });
+      continue;
+    }
     const paths = new Set([
       HOSTS[id].settingsPath(),
       ...assets.filter((a) => a.kind === 'hooks' && a.host === id).map((a) => a.path),
@@ -71,7 +90,7 @@ export function integrationRemoval(ids: HostId[], full = false): RemovalAction[]
       }
     }
     if (id === 'claude') {
-      const path = join(homedir(), '.claude.json');
+      const path = claudeMcpConfig();
       const settings = readJson(path);
       const servers = settings.mcpServers as
         | Record<string, { command?: string; args?: string[] }>
@@ -112,7 +131,7 @@ export function integrationRemoval(ids: HostId[], full = false): RemovalAction[]
           : `Remove the GreatPing skill through npx skills for ${ids[0]}`,
       run: () =>
         removeManagedSkill(
-          full || ids.length > 1 ? undefined : ids[0] === 'claude' ? 'claude-code' : 'codex',
+          full || ids.length > 1 ? undefined : ids[0] === 'claude' ? 'claude-code' : ids[0],
         ),
     });
   }

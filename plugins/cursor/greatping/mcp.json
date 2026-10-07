@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "greatping": {
+      "command": "node",
+      "args": [
+        "${CURSOR_PLUGIN_ROOT}/scripts/bridge.mjs",
+        "cursor",
+        "mcp"
+      ]
+    }
+  }
+}

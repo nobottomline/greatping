@@ -148,6 +148,7 @@ export function createMcpServer(): McpServer {
         z.object({
           paired: z.boolean(),
           connection: z.enum(['unpaired', 'connected', 'revoked', 'unreachable']),
+          pairingProblem: z.enum(['unpaired', 'environment_mismatch']).nullable(),
           alertsPausedUntil: z.number().nullable(),
           deviceCount: z.number().nullable(),
           integrations: z.array(
@@ -158,6 +159,37 @@ export function createMcpServer(): McpServer {
               mcp: z.boolean(),
               skill: z.boolean(),
               lastHookAt: z.number().nullable(),
+            }),
+          ),
+          plugins: z.array(
+            z.object({
+              id: z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor']),
+              status: z.enum(['absent', 'disabled', 'unconfigured', 'ready', 'broken', 'unknown']),
+              version: z.string().nullable(),
+              finished: z.boolean(),
+              alerts: z.array(z.string()),
+              problem: z.string().nullable(),
+              conflicts: z.array(z.string()),
+              hookTrust: z.literal('host-managed'),
+              lastAlert: z
+                .object({
+                  at: z.number(),
+                  outcome: z.enum(['accepted', 'failed']),
+                  problem: z
+                    .enum([
+                      'unpaired',
+                      'environment_mismatch',
+                      'revoked',
+                      'network',
+                      'timeout',
+                      'rate_limited',
+                      'service',
+                      'rejected',
+                      'local',
+                    ])
+                    .nullable(),
+                })
+                .nullable(),
             }),
           ),
         }),

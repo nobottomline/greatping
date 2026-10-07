@@ -86,6 +86,9 @@ try {
       '--test',
       'test/hook-runner.test.mjs',
       'test/mcp.test.mjs',
+      ...(process.platform === 'win32'
+        ? []
+        : ['test/plugins.test.mjs', 'test/native-adapters.test.mjs']),
     ],
     { env, stdio: 'inherit' },
   );

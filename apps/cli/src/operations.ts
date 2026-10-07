@@ -4,6 +4,7 @@ import {
   type AlertHost,
   type Answer,
   type CreateRequestBody,
+  categoryHint,
   type HostIntegration,
   LIMITS,
   type MachineMeResponse,
@@ -11,11 +12,12 @@ import {
   type PingRequest,
 } from '@greatping/protocol';
 import WebSocket from 'ws';
-import { ApiError, api } from './api';
+import { ApiError, api, takeCommandsWaiting } from './api';
 import { UsageError } from './commands/usage';
-import { type Config, isPaired, loadConfig } from './config';
+import { type Config, isPaired, loadConfig, pairingProblem } from './config';
+import { sealRequest, syncProjectCommands, UnverifiedAnswerError, verifyAnswer } from './content';
 import { projectFields } from './identity';
-import { hostIntegrations } from './integrations';
+import { hostIntegrations, pluginDiagnostics } from './integrations';
 
 function paired(): Config {
   const config = loadConfig();
@@ -81,23 +83,34 @@ export async function sendNotice(
     );
   if (title !== undefined && title.length > 100)
     throw new UsageError('notify', 'Titles are limited to 100 characters.');
+  const config = paired();
   const { projectLabel, ...source } = originFields(origin);
-  const body: CreateRequestBody = {
-    kind: 'notify',
-    ...source,
-    content: {
-      enc: 0,
+  const envelope = await sealRequest(
+    config,
+    {
+      kind: 'notify',
+      host: source.host,
+      ...(source.projectKey ? { projectKey: source.projectKey } : {}),
+    },
+    {
       body: message.trim(),
       ...(title?.trim() ? { title: title.trim() } : {}),
       ...(projectLabel ? { projectLabel } : {}),
     },
-    timeoutSec: 300,
-  };
-  const request = await api<PingRequest>(paired(), 'POST', '/requests', {
+    { fresh: true },
+  );
+  const body: CreateRequestBody = { kind: 'notify', ...source, envelope, timeoutSec: 300 };
+  const request = await api<PingRequest>(config, 'POST', '/requests', {
     body,
     signal: bounded(signal),
   });
+  await applyWaitingCommands(config);
   return { requestId: request.id, status: request.paused ? 'paused' : 'accepted' };
+}
+
+/** Applies project changes made on a device, when the last response said some wait. */
+async function applyWaitingCommands(config: Config): Promise<void> {
+  if (takeCommandsWaiting()) await syncProjectCommands(config).catch(() => {});
 }
 
 export async function changePause(
@@ -127,12 +140,20 @@ export interface AgentStatus {
   alertsPausedUntil: number | null;
   deviceCount: number | null;
   integrations: HostIntegration[];
+  plugins: ReturnType<typeof pluginDiagnostics>;
+  pairingProblem: ReturnType<typeof pairingProblem>;
 }
 
 /** Read only: no machine report, settings writes, credentials or device names. */
 export async function getAgentStatus(signal?: AbortSignal): Promise<AgentStatus> {
   const config = loadConfig();
-  const local = { alertsPausedUntil: null, deviceCount: null, integrations: hostIntegrations() };
+  const local = {
+    alertsPausedUntil: null,
+    deviceCount: null,
+    integrations: hostIntegrations(true),
+    plugins: pluginDiagnostics(true),
+    pairingProblem: pairingProblem(config),
+  };
   if (!isPaired(config)) return { ...local, paired: false, connection: 'unpaired' };
   try {
     const me = await readMachine(config, signal);
@@ -184,38 +205,67 @@ export async function askQuestion(
   // Once creation begins, finish it even on cancellation so the returned ID can
   // be withdrawn. Aborting a POST can otherwise orphan a question on the phone.
   const { projectLabel, ...source } = originFields(options.origin ?? COMMAND_ORIGIN);
+  const trimmed = choices.map((choice) => choice.trim());
+  // A question without choices always takes the user's own words.
+  const allowText = trimmed.length === 0 || options.allowText === true;
+  // The server cannot see the choices; the hint tells it which buttons fit.
+  const hint = categoryHint(trimmed, allowText);
+  const envelope = await sealRequest(
+    config,
+    {
+      kind: 'ask',
+      host: source.host,
+      ...(source.projectKey ? { projectKey: source.projectKey } : {}),
+      hint,
+    },
+    {
+      body: question.trim(),
+      ...(trimmed.length > 0 ? { choices: trimmed } : {}),
+      ...(trimmed.length > 0 && allowText ? { allowText: true } : {}),
+      ...(projectLabel ? { projectLabel } : {}),
+    },
+    { fresh: true },
+  );
   const body: CreateRequestBody = {
     kind: 'ask',
     ...source,
-    content: {
-      enc: 0,
-      body: question.trim(),
-      choices: choices.map((choice) => choice.trim()),
-      ...(choices.length > 0 && options.allowText ? { allowText: true } : {}),
-      ...(projectLabel ? { projectLabel } : {}),
-    },
+    hint,
+    envelope,
     timeoutSec: timeoutSeconds,
   };
   const request = await api<PingRequest>(config, 'POST', '/requests', {
     body,
     signal: AbortSignal.timeout(8000),
   });
+  await applyWaitingCommands(config);
   try {
     options.onCreated?.(request);
     const result = await waitForAnswer(config, request, signal);
     if (result.status === 'pending') throw new Error('The question ended without a final state.');
-    if (
-      result.status === 'answered' &&
-      !(result.answer?.choice?.trim() || result.answer?.text?.trim())
-    )
+    const answer =
+      result.status === 'answered'
+        ? await verifyAnswer(
+            config,
+            { envelope, choices: trimmed, allowText },
+            result.answerEnvelope,
+          )
+        : undefined;
+    if (answer && !(answer.choice?.trim() || answer.text?.trim()))
       throw new Error('The device returned an empty answer.');
     return {
       requestId: result.id,
       status: result.status,
       paused: request.paused === true,
-      ...(result.answer ? { answer: result.answer } : {}),
+      ...(answer ? { answer } : {}),
     };
   } catch (error) {
+    if (error instanceof UnverifiedAnswerError) {
+      // Fail closed: the question is withdrawn, and nothing unverified is returned.
+      await api(config, 'POST', `/requests/${request.id}/cancel`, {
+        signal: AbortSignal.timeout(3000),
+      }).catch(() => {});
+      throw error;
+    }
     if (!signal?.aborted) throw error;
     // Cancellation is acknowledged only after the server accepts withdrawal.
     await api(config, 'POST', `/requests/${request.id}/cancel`, {

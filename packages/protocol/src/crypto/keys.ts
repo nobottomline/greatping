@@ -64,13 +64,23 @@ export function verifyBytes(key: PublicKey, message: Uint8Array, signature: stri
   }
 }
 
-/** Whether keys are well formed for their algorithms (32-byte Ed25519 and X25519 keys). */
+/**
+ * Whether keys are well formed for their algorithms: 32-byte keys, and an
+ * Ed25519 key that is a canonical point outside the small-order subgroup, so
+ * every verifier (noble here, CryptoKit in the iOS extension) treats its
+ * signatures alike.
+ */
 export function validMemberKeys(keys: MemberKeys): boolean {
   try {
     if (keys.sign.alg !== SIGN_ALG || keys.enc.alg !== ENC_ALG) return false;
     const sign = fromBase64Url(keys.sign.key);
     const enc = fromBase64Url(keys.enc.key);
-    return sign.length === 32 && enc.length === 32 && ed25519.utils.isValidPublicKey(sign, false);
+    return (
+      sign.length === 32 &&
+      enc.length === 32 &&
+      ed25519.utils.isValidPublicKey(sign, false) &&
+      !ed25519.Point.fromBytes(sign, false).isSmallOrder()
+    );
   } catch {
     return false;
   }

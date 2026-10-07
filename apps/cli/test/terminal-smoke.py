@@ -18,6 +18,11 @@ CLI = Path(os.environ.get('GREATPING_TEST_CLI', ROOT / 'dist/index.js'))
 NODE = os.environ.get('GREATPING_TEST_NODE') or subprocess.check_output(
     ['node', '-p', 'process.execPath'], text=True).strip()
 VERSION = json.loads((ROOT / 'package.json').read_text())['version']
+SERVICE_ORIGIN = subprocess.check_output([
+    NODE, '--experimental-transform-types', '--no-warnings',
+    f'--import={ROOT / "test/ts-resolve.mjs"}', '--input-type=module', '-e',
+    "import { SERVICE_ORIGIN } from '@greatping/protocol'; process.stdout.write(SERVICE_ORIGIN)",
+], cwd=ROOT, text=True).strip()
 ACTIVE = []
 
 
@@ -99,12 +104,21 @@ try:
         root = Path(temporary)
         config = root / '.config/greatping'
         config.mkdir(parents=True)
-        (config / 'config.json').write_text(json.dumps({
-            'apiUrl': 'https://greatping-api-dev.ueldo343.workers.dev',
-            'machineId': 'terminal-machine', 'machineToken': 'fixture-token'}))
+        # A pairing with keys and a manifest, as `greatping login` saves it, so
+        # questions and notices are sealed for the fixture's phone.
+        (config / 'config.json').write_text(subprocess.check_output([
+            NODE, '--experimental-transform-types', '--no-warnings',
+            f'--import={ROOT / "test/ts-resolve.mjs"}', '--input-type=module', '-e',
+            "import { pairedConfig } from './test/fixtures/account.mjs';"
+            f"process.stdout.write(JSON.stringify(pairedConfig({json.dumps(SERVICE_ORIGIN)})))",
+        ], cwd=ROOT, text=True))
         env = {'HOME': temporary, 'XDG_CONFIG_HOME': str(root / '.config'),
             'PATH': os.environ['PATH'], 'TERM': 'xterm-256color', 'NO_COLOR': '1',
-            'NODE_OPTIONS': f'--import={ROOT / "test/fixtures/terminal-fetch.mjs"}',
+            # The fixture seals the phone's answers, so it loads the TypeScript protocol.
+            'NODE_OPTIONS': '--experimental-transform-types --no-warnings '
+                f'--import={ROOT / "test/ts-resolve.mjs"} '
+                f'--import={ROOT / "test/fixtures/terminal-fetch.mjs"}',
+            'GREATPING_TEST_ORIGIN': SERVICE_ORIGIN,
             'NO_UPDATE_NOTIFIER': '1'}
 
         actions = ['show', 'labels folder', 'labels hidden', 'name <name>', 'hide', 'reset', 'list']
@@ -159,7 +173,7 @@ try:
             saved = folder / '.config/greatping'
             saved.mkdir(parents=True)
             value = json.loads((config / 'config.json').read_text()) if paired else {
-                'apiUrl': 'https://greatping-api-dev.ueldo343.workers.dev'}
+                'apiUrl': SERVICE_ORIGIN}
             (saved / 'config.json').write_text(json.dumps(value))
             return {**env, 'HOME': str(folder), 'XDG_CONFIG_HOME': str(folder / '.config'),
                     'GREATPING_TEST_ACTIVITY': mode}, saved
@@ -362,7 +376,7 @@ try:
         assert b'Checking' not in result.stderr and b'\x1b' not in result.stderr
         print('PASS Status signals cancel all requests, restore the cursor and preserve JSON/CI/pipe output')
 
-        endpoint = 'greatping-api-dev.ueldo343.workers.dev'
+        endpoint = SERVICE_ORIGIN.removeprefix('https://')
         for args in [['login'], ['status'], ['doctor']]:
             t = Terminal(args, env); t.finish()
             assert endpoint not in t.output, t.output

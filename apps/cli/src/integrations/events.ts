@@ -11,6 +11,8 @@ import type { AttentionReason } from '@greatping/protocol';
 export interface HookInput {
   hook_event_name?: string;
   session_id?: string;
+  correlation?: string;
+  reason?: string;
   /** The session's working directory; only its project label may be sent. */
   cwd?: string;
   tool_name?: string;
@@ -19,6 +21,9 @@ export interface HookInput {
   notification_type?: string;
   stop_hook_active?: boolean;
   permission_context?: { auto_response?: string };
+  conversation_id?: string;
+  workspace_roots?: string[];
+  status?: string;
 }
 
 export type HookStep =
@@ -119,6 +124,47 @@ export function codexSteps(input: HookInput, options: HookOptions): HookStep[] {
     case 'UserPromptSubmit':
     case 'SessionStart':
     case 'SessionEnd':
+      return [{ op: 'resolve-session' }];
+    default:
+      return [];
+  }
+}
+
+/** Native adapters strip host data before stdin; accept only lifecycle metadata. */
+export function nativeSteps(input: HookInput, options: HookOptions): HookStep[] {
+  if (!input.session_id) return [];
+  switch (input.hook_event_name) {
+    case 'PromptOpen':
+      return input.correlation && ['question', 'permission', 'input'].includes(input.reason ?? '')
+        ? [
+            {
+              op: 'notify',
+              correlation: input.correlation,
+              reason: input.reason as AttentionReason,
+            },
+          ]
+        : [];
+    case 'PromptClose':
+      return input.correlation ? [{ op: 'resolve', correlation: input.correlation }] : [];
+    case 'Finished':
+      return finishedSteps(options);
+    case 'Started':
+    case 'SessionEnd':
+      return [{ op: 'resolve-session' }];
+    default:
+      return [];
+  }
+}
+
+/** Cursor has no documented native question/approval-wait event. */
+export function cursorSteps(input: HookInput, options: HookOptions): HookStep[] {
+  if (!input.conversation_id && !input.session_id) return [];
+  switch (input.hook_event_name) {
+    case 'stop':
+      return input.status === 'completed' ? finishedSteps(options) : [{ op: 'resolve-session' }];
+    case 'beforeSubmitPrompt':
+    case 'sessionStart':
+    case 'sessionEnd':
       return [{ op: 'resolve-session' }];
     default:
       return [];

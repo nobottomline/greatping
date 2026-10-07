@@ -7,7 +7,7 @@ import { recordManagedSkill, SKILLS_RUNNER } from './managed-skills';
 import type { HostId } from './state';
 
 /** Hand skill selection and installation to the upstream skills CLI. */
-export async function setupSkills(only: HostId | null): Promise<number> {
+export async function setupSkills(only: HostId | null, hosts?: HostId[]): Promise<number> {
   ui.heading('Agent skill');
   print('  Set up the GreatPing skill for your agents?');
   print(`  ${muted('Use “ping me” and “pause alerts” in your agent chats.')}`);
@@ -44,7 +44,8 @@ export async function setupSkills(only: HostId | null): Promise<number> {
     'greatping',
     '--global',
   ];
-  if (only) args.push('--agent', only === 'claude' ? 'claude-code' : only);
+  for (const id of hosts ?? (only ? [only] : []))
+    args.push('--agent', id === 'claude' ? 'claude-code' : id);
   ui.next(command(`npx ${args.slice(1).join(' ')}`));
   print();
   // --yes approves fetching the npm runner; skills keeps its own prompts.

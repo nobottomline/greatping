@@ -14,9 +14,9 @@ import { z } from 'zod';
 import { configDir } from '../config';
 
 const assetSchema = z.object({
-  kind: z.enum(['hooks', 'mcp', 'skill', 'backup', 'skills']),
+  kind: z.enum(['hooks', 'mcp', 'skill', 'backup', 'skills', 'adapter', 'adapter-entry']),
   path: z.string(),
-  host: z.enum(['claude', 'codex']).optional(),
+  host: z.enum(['claude', 'codex', 'opencode', 'pi', 'cursor']).optional(),
   fingerprint: z.string().optional(),
   launcher: z.object({ command: z.string(), args: z.array(z.string()) }).optional(),
 });

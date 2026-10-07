@@ -5,13 +5,16 @@ import process from 'node:process';
 import { CLAUDE_ALERTS, type ClaudeAlert } from './events';
 import { type HookGroup, type HookHandler, hookGroups, readJson, writeJson } from './json-file';
 import {
+  findOnPath,
   isVersionedPath,
   type Launcher,
   launcherProblem,
   parseShellCommand,
   shellCommand,
 } from './launcher';
+import { nativeHome } from './native-adapters';
 import { forgetAsset, ownedAssets, recordAsset } from './ownership';
+import { claudeHome } from './plugins';
 import type { HostId } from './state';
 
 /**
@@ -33,6 +36,7 @@ interface HookEvent {
 
 export interface HostHooks {
   id: HostId;
+  native?: boolean;
   name: string;
   settingsPath(): string;
   /** Whether the host appears to be set up for this user. */
@@ -74,12 +78,37 @@ function codexHome(): string {
   return process.env.CODEX_HOME ?? join(homedir(), '.codex');
 }
 
+function nativeDescriptor(id: 'opencode' | 'pi' | 'cursor'): HostHooks {
+  return {
+    id,
+    native: true,
+    name: id === 'cursor' ? 'Cursor IDE' : id === 'pi' ? 'Pi' : 'OpenCode',
+    settingsPath: () =>
+      join(
+        nativeHome(id),
+        id === 'cursor' ? 'hooks.json' : id === 'pi' ? 'settings.json' : 'opencode.json',
+      ),
+    detected: () => existsSync(nativeHome(id)) || Boolean(findOnPath(id)),
+    events: [],
+    handler: () => {
+      throw new Error('Use the native adapter through greatping setup.');
+    },
+    activation:
+      id === 'cursor'
+        ? 'Reload Cursor IDE and inspect Customize; local plugin imports must be allowed.'
+        : 'Restart the host to load the native adapter.',
+  };
+}
+
 export const HOSTS: Record<HostId, HostHooks> = {
+  cursor: nativeDescriptor('cursor'),
+  opencode: nativeDescriptor('opencode'),
+  pi: nativeDescriptor('pi'),
   claude: {
     id: 'claude',
     name: 'Claude Code',
-    settingsPath: () => join(homedir(), '.claude', 'settings.json'),
-    detected: () => existsSync(join(homedir(), '.claude')),
+    settingsPath: () => join(claudeHome(), 'settings.json'),
+    detected: () => existsSync(claudeHome()),
     events: CLAUDE_EVENTS,
     // Exec form: no shell, so paths with spaces need no quoting. Attention
     // hooks are async; Stop and SessionEnd finish before host teardown.
@@ -208,6 +237,7 @@ export interface HooksState {
 }
 
 export function inspectHooks(host: HostHooks): HooksState {
+  if (host.native) return { status: 'off', finished: false, problem: null, invocation: null };
   let groups: Record<string, HookGroup[]>;
   try {
     groups = hookGroups(readJson(host.settingsPath()));
@@ -258,6 +288,7 @@ export function installHooks(
   finished: boolean,
   alerts?: ClaudeAlert[],
 ): void {
+  if (host.native) throw new Error('Use greatping setup for native adapters.');
   const path = host.settingsPath();
   const settings = readJson(path);
   const groups = { ...hookGroups(settings) };
@@ -292,6 +323,7 @@ export function installHooks(
 
 /** Removes only GreatPing's hooks; returns whether anything changed. */
 export function uninstallHooks(host: HostHooks): boolean {
+  if (host.native) return false;
   const path = host.settingsPath();
   if (!existsSync(path)) return false;
   const settings = readJson(path);

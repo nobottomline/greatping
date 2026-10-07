@@ -1,0 +1,13 @@
+{
+  "name": "greatping",
+  "version": "0.2.0",
+  "description": "Phone alerts when Cursor IDE finishes successfully, with GreatPing MCP tools and skill.",
+  "author": {
+    "name": "Great Love"
+  },
+  "repository": "https://github.com/nobottomline/greatping",
+  "license": "MIT",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./mcp.json",
+  "skills": "./skills"
+}

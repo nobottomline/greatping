@@ -2,6 +2,7 @@ import { loadConfig } from '../config';
 import { HOST_IDS, inspectHost } from '../integrations';
 import { HOSTS, installHooks, uninstallHooks } from '../integrations/host-hooks';
 import { currentLauncher } from '../integrations/launcher';
+import { nativeHost } from '../integrations/native-adapters';
 import { reportMachineWithProgress } from '../report';
 import { muted, print, ui } from '../ui';
 import { hostSummary, parseHost } from './setup';
@@ -28,11 +29,22 @@ export async function hooks(
     return 0;
   }
   const only = parseHost(target, 'hooks');
-  const ids = only ? [only] : HOST_IDS.filter((id) => inspectHost(id).detected);
+  if (only && nativeHost(only))
+    throw new UsageError('hooks', `Use greatping setup ${only} for its native adapter.`);
+  const ids = only ? [only] : HOST_IDS.filter((id) => !nativeHost(id) && inspectHost(id).detected);
   if (action === 'install') {
     if (ids.length === 0) {
       ui.info('Neither Claude Code nor Codex was found for this user.');
       return 0;
+    }
+    for (const id of ids) {
+      const host = HOSTS[id];
+      if (inspectHost(id, true).plugin.status !== 'absent') {
+        ui.error(
+          `${host.name} has a native plugin registration. Use greatping setup ${id} to configure it; remove the plugin through its owner before installing direct hooks.`,
+        );
+        return 1;
+      }
     }
     const launcher = currentLauncher();
     for (const id of ids) {

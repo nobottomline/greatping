@@ -187,8 +187,10 @@ async function waitForApproval(config: Config, start: PairStartResponse): Promis
 
 /** Offers to set up agents that are here but not alerting yet. */
 async function offerSetup(): Promise<number> {
-  const pending = HOST_IDS.map(inspectHost).filter(
-    (report) => report.detected && report.hooks.status !== 'ok',
+  const pending = HOST_IDS.map((id) => inspectHost(id, true)).filter((report) =>
+    report.plugin.status === 'absent'
+      ? report.detected && report.hooks.status !== 'ok'
+      : !['ready', 'disabled'].includes(report.plugin.status) || report.conflicts.length > 0,
   );
   if (pending.length === 0) return 0;
   const names = pending.map((report) => report.host.name).join(' and ');

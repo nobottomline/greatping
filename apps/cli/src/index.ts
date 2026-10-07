@@ -14,7 +14,7 @@ import { status } from './commands/status';
 import { test } from './commands/test';
 import { uninstall } from './commands/uninstall';
 import { UsageError } from './commands/usage';
-import { isPaired, loadConfig } from './config';
+import { isPaired, loadConfig, pairingProblem } from './config';
 import { runHook } from './integrations/runner';
 import { startMcp } from './mcp';
 import { CommandInterrupted } from './progress';
@@ -168,9 +168,14 @@ const commands: Record<string, Command> = {
   },
   setup: {
     usage:
-      'greatping setup [claude|codex] [--finished|--no-finished] [--no-skill] [--remove] [--yes]',
-    summary: 'Set up Claude Code and Codex to alert your devices',
+      'greatping setup [claude|codex|opencode|pi|cursor] [--finished|--no-finished] [--no-skill] [--migrate|--remove] [--yes]',
+    summary: 'Set up Claude Code, Codex, OpenCode, Pi and Cursor IDE alerts',
     details: [
+      'Claude/Codex plugins are configured automatically; their bundled',
+      'hooks, MCP and skill remain owned by the native plugin manager.',
+      'OpenCode/Pi/Cursor IDE: install bundled native adapters, tools and skill offline.',
+      'Restart the host to activate them; --remove unregisters the owned adapter.',
+      'Use --migrate to remove owned direct integrations after plugin configuration.',
       'Claude Code: alerts when it asks a question or needs a permission, and the',
       'alert clears when the prompt closes. Codex: alerts when it finishes a turn,',
       'plus GreatPing tools over MCP. Choose alerts interactively,',
@@ -184,13 +189,15 @@ const commands: Record<string, Command> = {
       'no-finished': { type: 'boolean' },
       'no-skill': { type: 'boolean' },
       remove: { type: 'boolean' },
+      migrate: { type: 'boolean' },
       yes: { type: 'boolean', short: 'y' },
     },
     flags: [
-      ['--finished', 'Claude Code: also alert when a CLI or SDK turn finishes'],
+      ['--finished', 'Also alert when an agent turn finishes'],
       ['--no-finished', 'Turn finished-turn alerts off (Codex: removes its alerts)'],
       ['--no-skill', 'Skip the separate skill setup step'],
       ['--remove', 'Remove everything GreatPing set up for the agents'],
+      ['--migrate', 'Migrate owned direct integrations to an installed plugin'],
       ['-y, --yes', 'Skip the confirmation (required when not interactive)'],
     ],
     run: (v, p) =>
@@ -198,6 +205,7 @@ const commands: Record<string, Command> = {
         ...(v.finished ? { finished: true } : v['no-finished'] ? { finished: false } : {}),
         skill: !v['no-skill'],
         remove: Boolean(v.remove),
+        migrate: Boolean(v.migrate),
         yes: Boolean(v.yes),
       }),
   },
@@ -286,13 +294,37 @@ const commands: Record<string, Command> = {
       return new Promise<number>(() => {});
     },
   },
+  'runtime-health': {
+    usage: 'greatping runtime-health',
+    summary: 'Internal: local pairing readiness',
+    hidden: true,
+    options: {},
+    run: () => {
+      process.stdout.write(`${JSON.stringify({ problem: pairingProblem(loadConfig()) })}\n`);
+      return 0;
+    },
+  },
+  'adapter-capabilities': {
+    usage: 'greatping adapter-capabilities',
+    summary: 'Internal: supported native adapters',
+    hidden: true,
+    options: {},
+    run: () => {
+      process.stdout.write('opencode,pi,cursor\n');
+      return 0;
+    },
+  },
   hook: {
-    usage: 'greatping hook <claude|codex> [--finished]',
+    usage: 'greatping hook <claude|codex|opencode|pi|cursor> [--finished]',
     summary: 'Internal: handle an agent hook event from stdin',
     hidden: true,
     options: { finished: { type: 'boolean' }, alerts: { type: 'string' } },
     run: (v, p) =>
-      p[0] === 'claude' || p[0] === 'codex'
+      p[0] === 'claude' ||
+      p[0] === 'codex' ||
+      p[0] === 'opencode' ||
+      p[0] === 'pi' ||
+      p[0] === 'cursor'
         ? runHook(p[0], {
             finished: Boolean(v.finished),
             ...(typeof v.alerts === 'string'

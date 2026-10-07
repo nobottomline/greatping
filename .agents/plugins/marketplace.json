@@ -1,0 +1,20 @@
+{
+  "name": "greatping",
+  "interface": {
+    "displayName": "GreatPing"
+  },
+  "plugins": [
+    {
+      "name": "greatping",
+      "source": {
+        "source": "local",
+        "path": "./plugins/codex/greatping"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

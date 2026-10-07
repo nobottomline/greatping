@@ -1,0 +1,13 @@
+{
+  "name": "greatping",
+  "owner": {
+    "name": "Great Love"
+  },
+  "plugins": [
+    {
+      "name": "greatping",
+      "source": "./plugins/cursor/greatping",
+      "version": "0.2.0"
+    }
+  ]
+}

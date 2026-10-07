@@ -17,5 +17,10 @@ export default defineConfig({
   outExtensions: () => ({ js: '.js' }),
   banner: { js: '#!/usr/bin/env node' },
   // Scripted setup installs the bundled skill offline.
-  copy: [{ from: '../../skills/greatping/SKILL.md', to: 'dist' }],
+  copy: [
+    { from: '../../plugins/cursor/greatping', to: 'dist/adapters/cursor' },
+    { from: '../../skills/greatping/SKILL.md', to: 'dist' },
+    { from: '../../plugins/opencode/greatping', to: 'dist/adapters/opencode' },
+    { from: '../../plugins/pi/greatping', to: 'dist/adapters/pi' },
+  ],
 });

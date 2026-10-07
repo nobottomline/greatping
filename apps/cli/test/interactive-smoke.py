@@ -172,6 +172,31 @@ try:
         assert json.loads((home / '.claude/settings.json').read_text()).get('hooks')
         print('PASS Installer failure returns 1 and retains saved hooks')
 
+        # Native plugin onboarding uses one confirmation, without the alert/skill picker.
+        plugin_home, plugin_env = fixture(home.parent / 'plugin-onboarding')
+        package = plugin_home / '.claude/plugins/cache/greatping/greatping/preview'
+        shutil.copytree(Path(__file__).resolve().parents[3] / 'plugins/claude/greatping', package)
+        inventory = plugin_home / '.claude/plugins/installed_plugins.json'
+        inventory.write_text(json.dumps({'version': 2, 'plugins': {'greatping@greatping': [{
+            'scope': 'user', 'installPath': str(package), 'version': 'preview'}]}}))
+        (plugin_home / '.claude/settings.json').write_text(json.dumps({
+            'enabledPlugins': {'greatping@greatping': True}}))
+        before = hashes(plugin_home)
+        t = Terminal(['setup'], plugin_env)
+        t.wait('Apply these plugin settings?'); t.send('n\r'); t.finish()
+        assert hashes(plugin_home) == before
+        assert 'Enter Toggle' not in t.output
+        t = Terminal(['setup'], plugin_env)
+        t.wait('Apply these plugin settings?'); t.send('\x03'); t.finish(130)
+        assert hashes(plugin_home) == before
+        t = Terminal(['setup', 'claude'], plugin_env)
+        t.wait('Apply these plugin settings?'); t.send('\r'); t.finish()
+        assert 'plugin configured' in t.output
+        assert 'Enter Select' not in t.output and 'Enter Toggle' not in t.output
+        assert not (plugin_home / 'npx-args.json').exists()
+        assert not json.loads((plugin_home / '.claude/settings.json').read_text()).get('hooks')
+        print('PASS Native plugin setup supports decline/Ctrl+C and skips duplicate hooks and skill prompts')
+
         # Public commands cannot select another API host. Help must not advertise it.
         for command in ['login', 'logout', 'status', 'ask', 'notify', 'pause', 'resume', 'doctor']:
             result = subprocess.run([NODE, str(CLI), command, '--server', 'https://other.example'],

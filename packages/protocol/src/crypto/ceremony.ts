@@ -1,4 +1,4 @@
-import { USER_CODE_ALPHABET } from '../index';
+import { USER_CODE_ALPHABET } from '../constants';
 import { equalBytes, fromBase64Url, lvCat, toBase64Url, utf8 } from './bytes';
 import {
   type CpaceTranscript,

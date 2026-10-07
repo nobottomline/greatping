@@ -3,11 +3,17 @@
   "ignoreExportsUsedInFile": true,
   "workspaces": {
     ".": {
-      "entry": ["scripts/**/*.mjs"]
+      "entry": [
+        "scripts/**/*.mjs",
+        "plugins/**/{bridge,native}.mjs",
+        "plugins/*/greatping/index.js",
+        "plugins/shared/{opencode,pi}.js"
+      ],
+      "ignoreDependencies": ["@earendil-works/pi-ai"]
     },
     "apps/cli": {
       "ignoreBinaries": ["scutil", "hostnamectl"],
-      "ignoreDependencies": ["@noble/curves", "@noble/hashes"]
+      "ignoreDependencies": ["@noble/ciphers", "@noble/curves", "@noble/hashes"]
     }
   }
 }

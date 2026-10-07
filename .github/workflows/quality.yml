@@ -33,6 +33,7 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm plugins:check
       - run: pnpm lint
       - run: bash scripts/quality/install-gitleaks.sh
       - run: pnpm secrets
@@ -131,3 +132,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Offline uninstall plan failed' }
           $plan | ConvertFrom-Json | Out-Null
           if (Test-Path "$env:XDG_CONFIG_HOME/greatping/config.json") { throw 'Dry-run wrote a credential' }
+          & $launcher setup opencode --yes
+          if ($LASTEXITCODE -ne 0) { throw 'Offline native adapter setup failed' }
+          $state = (& $launcher status --json) | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 1) { throw 'Expected unpaired status' }
+          $adapter = $state.plugins | Where-Object { $_.id -eq 'opencode' }
+          if ($adapter.status -ne 'ready') { throw 'Native adapter inventory failed' }
+          & $launcher setup opencode --remove --yes
+          if ($LASTEXITCODE -ne 0) { throw 'Native adapter removal failed' }
+          if (Test-Path "$env:XDG_CONFIG_HOME/opencode/plugins/greatping.js") { throw 'Native entrypoint remains' }
+          if (Test-Path "$env:XDG_CONFIG_HOME/greatping/config.json") { throw 'Native setup wrote a credential' }

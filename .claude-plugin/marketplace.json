@@ -1,0 +1,18 @@
+{
+  "name": "greatping",
+  "owner": {
+    "name": "Great Love",
+    "url": "https://greatping.com"
+  },
+  "metadata": {
+    "description": "GreatPing phone alerts and agent tools."
+  },
+  "plugins": [
+    {
+      "name": "greatping",
+      "source": "./plugins/claude/greatping",
+      "version": "0.2.0",
+      "description": "GreatPing phone alerts, MCP tools and skill for Claude Code."
+    }
+  ]
+}

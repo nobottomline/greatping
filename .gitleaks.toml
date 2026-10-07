@@ -14,3 +14,39 @@ condition = "AND"
 paths = ['''^apps/mobile/google-services\.json$''']
 regexTarget = "line"
 regexes = ['''^\s*"current_key"\s*:\s*"AIza[0-9A-Za-z_\-]{35}"\s*,?\s*$''']
+
+# Reviewed public RFC 9180 A.2.1 values; no new value or other rule is exempt.
+[[allowlists]]
+description = "Published RFC 9180 HPKE test vector values"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^packages/protocol/test/vectors/rfc9180-a2-base\.json$''']
+regexTarget = "secret"
+regexes = ['''^(?:0bbe78490412b4bbea4812666f7916932b828bba79942424abb65244930d69a7|00431df6cd95e11ff49d7013563baf7f11588c75a6611ee2a4404a49306ae4cfc5b69c5718a60cc5876c358d3f7fc31ddb598503f67be58ea1e798c0bb19eb9796|5b9cd775e64b437a2335cf499361b2e0d5e444d5cb41a8a53336d8fe402282c6|ad2744de8e17f4ebba575b3f5f5a8fa1f69c2a07f6e7500bc60ca6e3e3ec1c91)$''']
+
+# These opaque project identifiers are synthetic correlation labels, not keys.
+[[allowlists]]
+description = "Exact synthetic project identifiers in envelope fixtures"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^(?:packages/protocol/test/(?:e2e-vectors\.test\.ts|envelope\.test\.ts|vectors/e2e-v1\.json)|apps/mobile/test/content\.test\.ts)$''']
+regexTarget = "secret"
+regexes = ['''^(?:proj_0123456789|proj_12345678)$''']
+
+# Wrapped content keys are public ciphertext from the deterministic vector
+# generator. Match the reviewed bytes exactly; never exempt the whole file.
+[[allowlists]]
+description = "Exact deterministic envelope wrapped-key ciphertexts"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^packages/protocol/test/vectors/e2e-v1\.json$''']
+regexTarget = "secret"
+regexes = [
+  '''^1R0uyaVTnYL9LeELsO1mPr0OauY-2FULetm09gOCKlrorKrxsqVB2Hx0msPeTq6C$''',
+  '''^2-_eg4OTJjmUKliJlXmGIbve5HPRpfcx9u-DjgnVYVvHAa1M76L2fNRwXtOdNovh$''',
+  '''^GKAc4w7rVLweMTnq_S3KzE11CMBCFDCqI24QgAeCDNg9ofK5OSFI_EBPKA1tPL15$''',
+  '''^MM0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F$''',
+  '''^Mc0iuBgA7o3pc8LOHDNlYplQ1Edu26Ct4m0tFD4XCvt4OCKVAB7NDc02N_hr1S8F$''',
+  '''^kKsygZthzFPahv9c9-W9c8cf1OsbthHuWWyaRBAwNOo58Ysh8GTikWN6-n7gVjNX$''',
+  '''^pZWz17L2mQW-FgW4XNaEEURcVm4-zSEJKJ676NfefPKFxoIGEq2cFuul5tn4_Te8$''',
+]

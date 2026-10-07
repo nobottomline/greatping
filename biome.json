@@ -13,7 +13,8 @@
       "!**/dist",
       "!**/.expo",
       "!**/.turbo",
-      "!**/*.tsbuildinfo"
+      "!**/*.tsbuildinfo",
+      "!packages/protocol/test/vectors"
     ]
   },
   "formatter": {
@@ -46,7 +47,47 @@
   },
   "overrides": [
     {
+      "includes": [
+        "plugins/**/*.json",
+        "oss/.agents/plugins/marketplace.json",
+        "oss/.claude-plugin/marketplace.json",
+        "oss/.cursor-plugin/marketplace.json",
+        ".agents/plugins/marketplace.json",
+        ".claude-plugin/marketplace.json",
+        ".cursor-plugin/marketplace.json"
+      ],
+      "json": {
+        "formatter": {
+          "expand": "always"
+        }
+      }
+    },
+    {
+      "includes": ["plugins/**/bridge.mjs"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noUndeclaredEnvVars": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["scripts/quality/check-secrets.mjs", "scripts/quality/check-secrets.test.mjs"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noUndeclaredEnvVars": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "plugins/**/native.mjs",
+        "scripts/native-adapters.test.mjs",
+        "scripts/verify-native-adapters.mjs"
+      ],
       "linter": {
         "rules": {
           "suspicious": {

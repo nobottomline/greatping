@@ -5,6 +5,20 @@ Unreleased are not available merely by installing npm `latest`.
 
 ## Unreleased
 
+## 0.4.0 — 2026-10-07
+
+- Use the production GreatPing service. Existing development pairings must be
+  replaced through logout/login with the new app; credentials are never redirected.
+- Encrypt question, notification, project and answer content to verified devices
+  with signed manifests and confirmed pairing keys. Older plaintext clients are
+  incompatible with this release; no plaintext fallback is supported.
+- Bundle native OpenCode/Pi adapters and Cursor's local preview plugin. Add
+  plugin-aware setup, safe ownership tracking and actionable delivery diagnostics.
+- Package Claude Code/Codex plugins with hooks, MCP and skills. Plugin packages
+  require CLI >=0.4.0 and Node >=22.20.0, without runtime downloads.
+- Preserve cancellation, recovery and machine-readable output; transport failures
+  use exit code 3. Queuing an alert does not confirm its display on a phone.
+
 ## 0.3.3 — 2026-10-05
 
 - Make advanced hook management discoverable from CLI help, describe its actions

@@ -10,6 +10,44 @@ export function utf8(text: string): Uint8Array {
   return encoder.encode(text);
 }
 
+/**
+ * Strict UTF-8 decoding (no replacement characters): rejects overlong forms,
+ * surrogates and values above U+10FFFF. Written out because Hermes may lack
+ * `TextDecoder`, and every platform must accept exactly the same bytes.
+ */
+export function fromUtf8(bytes: Uint8Array): string {
+  const points: number[] = [];
+  for (let i = 0; i < bytes.length; ) {
+    const first = bytes[i] as number;
+    const size =
+      first < 0x80
+        ? 1
+        : first >= 0xc2 && first < 0xe0
+          ? 2
+          : first >= 0xe0 && first < 0xf0
+            ? 3
+            : first >= 0xf0 && first < 0xf5
+              ? 4
+              : 0;
+    if (size === 0 || i + size > bytes.length) throw new TypeError('invalid UTF-8');
+    let point = size === 1 ? first : first & (0xff >> (size + 1));
+    for (let k = 1; k < size; k++) {
+      const next = bytes[i + k] as number;
+      if ((next & 0xc0) !== 0x80) throw new TypeError('invalid UTF-8');
+      point = (point << 6) | (next & 0x3f);
+    }
+    const min = [0, 0, 0x80, 0x800, 0x10000][size] as number;
+    if (point < min || point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff))
+      throw new TypeError('invalid UTF-8');
+    points.push(point);
+    i += size;
+  }
+  let out = '';
+  for (let i = 0; i < points.length; i += 4096)
+    out += String.fromCodePoint(...points.slice(i, i + 4096));
+  return out;
+}
+
 export function concat(...parts: Uint8Array[]): Uint8Array {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let offset = 0;
