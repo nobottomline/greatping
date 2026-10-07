@@ -92,6 +92,19 @@ jobs:
         with:
           ref: ${{ inputs.source || github.sha }}
           persist-credentials: false
+      # Unix suites import source helpers to inspect state and simulate a phone.
+      # Prepare those locked test dependencies on the build runtime. The CLI
+      # under test is still installed separately from the downloaded archive;
+      # package-smoke asserts that installation has no workspace protocol/tooling.
+      - if: runner.os != 'Windows'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - if: runner.os != 'Windows'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - if: runner.os != 'Windows'
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node }}
@@ -114,6 +127,13 @@ jobs:
         shell: pwsh
         run: |
           $installation = Join-Path $env:RUNNER_TEMP 'cli-install'
+          # setup-node's versioned cache is deliberately rejected as a durable
+          # plugin launcher. Use a stable fixture path for this exact matrix
+          # runtime, as a normal installed runtime/shim provides for users.
+          $runtime = Join-Path $env:RUNNER_TEMP 'cli-runtime'
+          New-Item -ItemType Directory -Force $runtime | Out-Null
+          Copy-Item (Get-Command node.exe).Source (Join-Path $runtime 'node.exe')
+          $env:PATH = "$runtime;$env:PATH"
           $env:HOME = Join-Path $env:RUNNER_TEMP 'cli-home'
           $env:USERPROFILE = $env:HOME
           $env:APPDATA = Join-Path $env:HOME 'AppData/Roaming'
