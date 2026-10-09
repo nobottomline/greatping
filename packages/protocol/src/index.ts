@@ -94,6 +94,11 @@ export interface Device {
   projectsInNotifications: boolean;
   /** When this device stays silent; alerts still reach its inbox. */
   quietHours: QuietHours | null;
+  /**
+   * Until when this device's notifications are paused; null when they are not.
+   * Alerts still reach its inbox, and security notices are never paused.
+   */
+  alertsPausedUntil: number | null;
   /** IANA time zone the device last reported; quiet hours follow it. */
   timeZone: string | null;
   approvedByDeviceId: string | null;
@@ -387,6 +392,8 @@ export const updateDeviceBodySchema = z.object({
     .optional(),
   /** IANA name such as "Europe/Berlin"; the server checks it is a time zone it knows. */
   timeZone: z.string().min(1).max(64).optional(),
+  /** A timestamp within the pause limit, or null to resume. */
+  alertsPausedUntil: z.number().int().positive().nullable().optional(),
 });
 export type UpdateDeviceBody = z.infer<typeof updateDeviceBodySchema>;
 
