@@ -41,20 +41,20 @@
     "test:package": "pnpm build && node test/package-smoke.mjs"
   },
   "dependencies": {
-    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/server": "2.3.1",
     "@noble/ciphers": "^2.4.0",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
     "picocolors": "^1.1.1",
     "smol-toml": "^1.9.0",
     "toqr": "0.1.1",
-    "ws": "^8.18.0",
+    "ws": "^8.22.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@greatping/protocol": "workspace:*",
     "@types/node": "^22.13.11",
-    "@types/ws": "^8.5.14",
+    "@types/ws": "^8.18.2",
     "tsdown": "0.23.0",
     "typescript": "~5.9.3"
   }
