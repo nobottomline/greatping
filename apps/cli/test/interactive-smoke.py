@@ -4,6 +4,7 @@ The npx fixture records the handoff; it never downloads packages or contacts an
 hosted API. Run after building: python3 test/interactive-smoke.py (macOS/Linux).
 """
 from pathlib import Path
+import codecs
 import fcntl
 import hashlib
 import json
@@ -26,7 +27,7 @@ ACTIVE = []
 
 
 class Terminal:
-    def __init__(self, args, env, rows=24, cols=80):
+    def __init__(self, args, env, rows=24, cols=80, read_size=65536):
         self.master, slave = pty.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
         self.process = subprocess.Popen([NODE, str(CLI), *args], stdin=slave,
@@ -34,7 +35,12 @@ class Terminal:
                                         start_new_session=True)
         os.close(slave)
         self.output = ''
+        self.read_size = read_size
+        self.decoder = codecs.getincrementaldecoder('utf-8')(errors='replace')
         ACTIVE.append(self)
+
+    def read_output(self):
+        self.output += self.decoder.decode(os.read(self.master, self.read_size))
 
     def wait(self, text):
         until = time.monotonic() + 10
@@ -43,7 +49,7 @@ class Terminal:
                 return
             if select.select([self.master], [], [], .1)[0]:
                 try:
-                    self.output += os.read(self.master, 65536).decode(errors='replace')
+                    self.read_output()
                 except OSError:
                     break
         raise AssertionError(f'Missing {text!r}: {self.output[-1500:]}')
@@ -62,10 +68,14 @@ class Terminal:
         while self.process.poll() is None and time.monotonic() < until:
             if select.select([self.master], [], [], .1)[0]:
                 try:
-                    self.output += os.read(self.master, 65536).decode(errors='replace')
+                    self.read_output()
                 except OSError:
                     break
-        assert self.process.wait(timeout=2) == expected, self.output[-1500:]
+        try:
+            actual = self.process.wait(timeout=2)
+        except subprocess.TimeoutExpired as error:
+            raise AssertionError(f'CLI did not exit: {self.output[-1500:]}') from error
+        assert actual == expected, self.output[-1500:]
         assert self.process.stdout.read() == b'', 'UI and child installer output must stay on stderr'
         self.close()
 
@@ -129,28 +139,29 @@ def plan(env, args=None, **kwargs):
     args = args or ['setup', '--no-skill']
     terminal = Terminal(args, env, **kwargs)
     if len(args) < 2 or args[1].startswith('-'):
-        terminal.wait('Choose agents')
-        terminal.press('\r', 'Review setup')
+        terminal.wait('◆  Choose agents')
+        terminal.press('\r', '◆  Review setup')
     else:
-        terminal.wait('Review setup')
+        terminal.wait('◆  Review setup')
     return terminal
 
 
 def customize(env, args=None, scope='claude', **kwargs):
     terminal = plan(env, args, **kwargs)
     index = 2 if scope == 'codex' and not (args and args[1] == 'codex') else 1
-    terminal.press(DOWN * index + '\r', ' settings')
+    name = 'Codex' if scope == 'codex' else 'Claude Code'
+    terminal.press(DOWN * index + '\r', f'◆  {name} settings')
     return terminal
 
 
 def apply(terminal, keys):
-    terminal.press(keys + '\r', 'Review setup')
+    terminal.press(keys + '\r', '◆  Review setup')
     terminal.output = ''
     terminal.send('\r')
 
 
 def leave(terminal):
-    terminal.press('\x1b', 'Review setup')
+    terminal.press('\x1b', '◆  Review setup')
     terminal.send('\x1b')
 
 
@@ -191,8 +202,12 @@ try:
         t = customize(env); t.wait('◻ Questions'); leave(t); t.finish()
         print('PASS Selected alert categories are installed and repeat setup is idempotent')
 
-        t = customize(env, rows=10, cols=44); t.wait(' settings'); t.resize(24, 80)
-        t.send(DOWN); leave(t); t.finish()
+        # Small reads expose queued frames from the previous menu. Its Done
+        # hint ("Keep these settings") must never count as a settings prompt,
+        # nor may a completed review frame count as the next active review.
+        for read_size in [65536, 32]:
+            t = customize(env, rows=10, cols=44, read_size=read_size)
+            t.resize(24, 80); t.send(DOWN); leave(t); t.finish()
         print('PASS Long lists scroll in a short terminal and stay usable after resize')
 
         claude_skill = home / '.claude/skills/greatping/SKILL.md'
