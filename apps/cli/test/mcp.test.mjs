@@ -84,8 +84,7 @@ async function session(mode, run, paired = true) {
       notify,
       log,
       root,
-      calls: () =>
-        existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse) : [],
+      calls: () => (existsSync(log) ? completeCalls(readFileSync(log, 'utf8')) : []),
     });
     assert.equal(paired ? readFileSync(config, 'utf8') : null, before);
   } finally {
@@ -99,6 +98,12 @@ async function session(mode, run, paired = true) {
     rmSync(root, { recursive: true, force: true });
   }
 }
+/** A concurrent append may expose an empty file or unfinished last JSONL record. */
+function completeCalls(text) {
+  const end = text.lastIndexOf('\n');
+  return end < 0 ? [] : text.slice(0, end).split('\n').filter(Boolean).map(JSON.parse);
+}
+
 /** The request bodies the server received; manifest checks are left out. */
 const created = (calls) => calls().filter((c) => c.path === '/v1/requests');
 

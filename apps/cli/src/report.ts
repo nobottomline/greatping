@@ -5,7 +5,7 @@ import { sealProjects, syncProjectCommands } from './content';
 import { describeMachine } from './describe';
 import { cachedProjectLabels, rememberProjectLabels } from './identity';
 import { hostIntegrations } from './integrations';
-import { followManifest } from './keys';
+import { confirmPendingCeremony, followManifest } from './keys';
 import { withProgress } from './progress';
 import { VERSION } from './version';
 
@@ -23,6 +23,7 @@ export async function reportMachine(config: Config, signal?: AbortSignal): Promi
     // Report the manifest version this computer verified, so devices notice a
     // server that stopped showing it their changes.
     signal?.throwIfAborted();
+    await confirmPendingCeremony(config, signal);
     const manifest = await followManifest(config, signal);
     signal?.throwIfAborted();
     // In Folder name mode, the recent projects, sealed, so devices can list and rename them.

@@ -128,6 +128,10 @@ test('crypto fixture exceptions match exact public values, paths and rules', () 
     }
     assert.equal(check('tree').status, 0);
     const publicValue = JSON.parse(readFileSync(join(root, paths[0]), 'utf8')).vector.key;
+    // Keep entropy deterministic: a random hex sample can fall below the
+    // generic-key rule's threshold. This distinct public fixture is never exempt.
+    const unreviewedGenericKey = [...publicValue].reverse().join('');
+    assert.notEqual(unreviewedGenericKey, publicValue);
     writeFileSync(join(root, 'outside-vector.json'), JSON.stringify({ key: publicValue }));
     assert.equal(check('tree').status, 1);
     rmSync(join(root, 'outside-vector.json'));
@@ -146,15 +150,12 @@ test('crypto fixture exceptions match exact public values, paths and rules', () 
     rmSync(join(root, 'outside-project.json'));
     writeFileSync(
       join(root, 'apps/mobile/test/content.test.ts'),
-      JSON.stringify({ api_key: randomBytes(32).toString('hex') }),
+      JSON.stringify({ api_key: unreviewedGenericKey }),
     );
     assert.equal(check('tree').status, 1);
     rmSync(join(root, 'apps/mobile/test/content.test.ts'));
     // A different generic key in the allowed file must still be detected.
-    writeFileSync(
-      join(root, paths[0]),
-      JSON.stringify({ api_key: randomBytes(32).toString('hex') }),
-    );
+    writeFileSync(join(root, paths[0]), JSON.stringify({ api_key: unreviewedGenericKey }));
     assert.equal(check('tree').status, 1);
     rmSync(join(root, paths[0]));
     // Other credential rules remain active even in deterministic vector files.

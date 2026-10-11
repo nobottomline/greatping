@@ -27,7 +27,7 @@ From a checkout, use Node.js 24 LTS (24.11 or later), build with `pnpm -F greatp
 
 Every command has `--help`. `login` names the computer as the OS does (for example "Alex's MacBook Pro"; override with `--name`), prints a QR code and a manual code, and waits with a countdown. When Claude Code or Codex is installed but not alerting yet, an interactive `login` offers `setup`; non-interactive runs only print the hint and never change another tool's settings. The CLI saves its bearer credential under `~/.config/greatping/config.json` on macOS/Linux or `%APPDATA%\greatping\config.json` on Windows with user-only permissions.
 
-The code has two halves, `ABCD-EFGH`. The first finds the pairing on the service; the second never leaves this computer and the phone it is typed or scanned into. The CLI and the phone run CPace (a password-authenticated key exchange) on it, so each confirms the other's keys and a service in between cannot swap them; a mistyped code makes `login` revoke itself with "The code did not match". The computer's Ed25519 and X25519 keys and the latest account manifest it verified (the signed list of the account's devices and computers) are kept in the same user-only config file. `status` shows them as Keys; a computer paired before keys shows `none` until it is paired again. Hourly reports follow the manifest, verify every new version and report the version in use, so devices notice a service that withholds changes. The protocol is in `packages/protocol/src/crypto`; `@noble/curves` and `@noble/hashes` are runtime dependencies because the bundled protocol imports them.
+The code has two halves, `ABCD-EFGH`. The first finds the pairing on the service; the second never leaves this computer and the phone it is typed or scanned into. The CLI and the phone run CPace (a password-authenticated key exchange) on it: when a phone enters the code, the CLI proves it knows the code, once, and the phone checks that proof before it signs anything, so a service in between cannot swap keys; a mistyped code ends the pairing on both sides with "The code did not match" and nothing is added. `login` then accepts only an approval that verifies against the version adding this computer, and revokes itself otherwise. Its final confirmation to the phone is saved before it is sent: if it does not get through, `login` exits `1`, `status` shows it as pending, and the next `greatping login` or hourly report sends the same confirmation without a new code. The computer's Ed25519 and X25519 keys and the latest account manifest it verified (the signed list of the account's devices and computers) are kept in the same user-only config file. `status` shows them as Keys; a computer paired before keys or by CLI 0.4 or earlier shows `none` until it is paired again (pairing v2 changed the manifest encoding). Hourly reports follow the manifest, verify every new version and report the version in use, so devices notice a service that withholds changes. The protocol is in `packages/protocol/src/crypto`; `@noble/curves` and `@noble/hashes` are runtime dependencies because the bundled protocol imports them.
 
 ## Output contract
 
@@ -77,6 +77,12 @@ so a different runtime cannot receive the update by accident. Unknown/custom
 layouts and source checkouts get a manual instruction. `doctor --verbose` shows
 the detected manager, package location, stable launcher and update command.
 
+When the service rejects an unsupported CLI with `client_outdated`, the CLI
+uses the same installation-specific update instructions, even if an older
+server message prescribes npm. This required-upgrade error does not query npm
+and remains actionable with automatic checks disabled. It means the service
+cannot accept this client's protocol, independently of npm update availability.
+
 For Vite+ installations use `vp install -g greatping@latest`. Its global store
 is separate from npm's globals, even when npm itself runs through Vite+.
 Hooks and MCP use the verified Vite+ shim, which survives package/Node upgrades.
@@ -99,24 +105,48 @@ understand their owned packages and preserve edited files. See the
 for tested host versions, source prerequisites, platform limits and distribution.
 
 
-`greatping setup` opens an interactive picker for detected agents (`setup claude`
-or `setup codex` selects one). Up/Down moves, Enter or Space toggles, and Enter on
-**Continue** saves. Enabled circles are green; disabled circles are dim. Escape
-cancels without writes; Ctrl+C returns 130. Choices reflect installed settings;
+`greatping setup` first lets you choose the agents to configure. Unselected
+agents keep their existing settings. An explicit target (`setup claude`,
+`setup opencode` and so on) skips this selection. The next screen reviews one
+plan: each agent has its notification coverage and a change mark (`+` set up,
+`~` change, `−` turn off, `✔` no change, `○` skipped, `✖` needs attention).
+Select an agent to edit only its settings; **Choose agents** changes the scope.
+Project names and the optional **Other agents** skill installer have separate
+entries. **Apply** makes the reviewed changes; **Cancel** or Escape writes
+nothing. Escape from an agent's settings discards that screen's edits and
+returns to review. Space toggles choices; Enter continues. Clack handles
+wrapping, scrolling and resizing, and every review row remains reachable in a
+short terminal. Ctrl+C returns 130; SIGTERM returns 143. Human output stays on
+stderr, including when stdout is piped.
+
+Previewing a paired computer reads its project-label setting without updating
+local caches, reporting the machine or taking queued project commands. Existing
+integration conflicts are shown before Apply; a plugin is not ready merely
+because its preferences exist. After applying, setup reports each operation
+and the required restart, hook trust or pairing actions once. Configuration
+saved is not a phone-delivery check. Choices reflect installed settings;
 all-off choices persist and unrelated agent hooks are preserved.
 
-After saving alerts and tools, a separate question offers skill setup or **Skip
-for now**. Choosing setup hands agent selection, installation method and final
-confirmation to `npx skills@1.7.0 add nobottomline/greatping --skill greatping --global`.
-The runner version is pinned for reproducible installation and removal.
-Skipping leaves existing skills installed; `--no-skill` skips this step entirely.
-The step also appears when alert settings are already up to date. npm's runner
-fetch is accepted automatically; the skills installer keeps its own prompts.
-It uses the npm/Node runtime on PATH (the current skills runner requires Node.js
-22.20 or later). Its output goes to stderr, keeping GreatPing's stdout contract.
-A failed skill installation leaves saved alert settings intact and provides a
-retry command. `setup --yes` retains the existing bundled, offline skill install
-for scripts and does not run npx.
+The skill is part of the same plan. Each agent set up directly gets the copy
+bundled with this CLI: Claude Code in `~/.claude/skills/greatping`, Codex in
+`~/.agents/skills/greatping` (also read by other agents that use `~/.agents`);
+plugins and native adapters carry their own. It is installed offline, included
+until you turn it off once, and removed when you turn off a copy GreatPing
+installed. **Install the skill with npx skills** hands any other agent to
+`npx skills@1.7.0 add nobottomline/greatping --skill greatping --global`, whose
+installer knows their paths and keeps its own prompts; npm's runner fetch is
+accepted automatically and its output goes to stderr. `--no-skill` leaves direct
+skill settings and the npx installer out of the plan; packaged integrations
+retain their bundled skill. A failed installer keeps the applied alert settings.
+`setup --yes` retains the existing scripted setup behavior and does not run npx.
+
+A bundled copy that nobody edited is updated to this CLI's skill: setup shows
+**update available**, `doctor` reports it and `doctor --fix` applies it, and
+`login` offers it. Edited copies, skills installed another way and `npx skills`
+installs are left as they are; update the last with
+`npx skills update greatping --global`.
+
+Updates require a matching ownership fingerprint or an unchanged recognized legacy bundled copy. A journal entry without a fingerprint does not authorize overwriting edits. Symlinked skill files and unrecorded copies matching the current version are left to their installer.
 
 Agent behavior:
 
@@ -141,7 +171,7 @@ setting. Use `greatping project show` for the current project's label, or
 `greatping project --help` for command descriptions. `greatping project --json`
 keeps the same settings output as `greatping project show --json` for scripts.
 
-Alerts can name the project an agent works in: "Codex · billing-api". The label is the folder name of the git repository (or worktree) root, or a name you choose; never a path. Labels are off until you turn them on in the `setup` picker (**Projects › Show project folder names**), with `greatping project labels folder`, or on the computer's screen in the app; `hidden` turns them off and the server then drops any label. Per project, from its directory: `greatping project name "Client A"` sends that name instead (for a folder under NDA, two clones with the same name, or a generic `app` folder), `greatping project hide` sends none, `greatping project reset` returns to the computer's setting and `greatping project list` shows the overrides. Overrides and the cached mode live in `alerts.json` next to the config, with the secret that keys the opaque ids. A device can also keep project names off its Lock Screen (Settings › Project Names); the app always shows them. Labels are deleted with the alert's text 7 days after it finishes.
+Alerts can name the project an agent works in: "Codex · billing-api". The label is the folder name of the git repository (or worktree) root, or a name you choose; never a path. Labels are off until you turn them on in `setup` (**Project names › Show project folder names**), with `greatping project labels folder`, or on the computer's screen in the app; `hidden` turns them off and the server then drops any label. Per project, from its directory: `greatping project name "Client A"` sends that name instead (for a folder under NDA, two clones with the same name, or a generic `app` folder), `greatping project hide` sends none, `greatping project reset` returns to the computer's setting and `greatping project list` shows the overrides. Overrides and the cached mode live in `alerts.json` next to the config, with the secret that keys the opaque ids. A device can also keep project names off its Lock Screen (Settings › Project Names); the app always shows them. Labels are deleted with the alert's text 7 days after it finishes.
 
 `greatping doctor` runs each installed hook with a test event and reports broken, outdated (from an older CLI or tied to one Node version) or never-run hooks; `--fix` repairs them.
 
@@ -339,8 +369,9 @@ to print unexpected-error stack traces.
 Run `pnpm -F greatping typecheck`, `pnpm -F greatping test` (Node.js 24 for the
 source loader), `pnpm -F greatping build`, and `pnpm -F greatping test:interactive`
 (Python 3 on macOS/Linux). The PTY smoke suite exercises the built executable in
-an isolated temporary home, including Enter/Continue, color, cancel/signals,
-repeat setup, a narrow terminal, all-off preferences and the npx handoff. Its
+an isolated temporary home, including the agent selection, per-agent review, color,
+cancel/signals, repeat setup, a short terminal, all-off preferences and the npx
+handoff. Its
 Codex and npx fixtures never contact the hosted service or install real skills.
 `pnpm -F greatping test:package` builds and installs an npm archive outside the
 workspace, verifies the executable and bundled skill, and runs the hook, MCP

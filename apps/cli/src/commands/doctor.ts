@@ -12,6 +12,7 @@ import { nativeHost, nativeHostProblem } from '../integrations/native-adapters';
 import { pluginCommand } from '../integrations/plugins';
 import { AWAY_AFTER_SEC, idleSeconds } from '../integrations/presence';
 import { PROBE_EVENT } from '../integrations/runner';
+import { installSkill, type SkillState, skillDir, skillState } from '../integrations/skill';
 import type { HostId } from '../integrations/state';
 import { CommandInterrupted, withProgress } from '../progress';
 import { reportMachineWithProgress } from '../report';
@@ -195,13 +196,40 @@ function hostChecks(report: HostReport, fix: boolean, problems: string[]): Check
     ]);
     if (mcp.registered && mcp.problem) problems.push('Codex tools cannot start');
   }
-  checks.push([
-    'Skill',
-    report.skill
-      ? ok('installed')
-      : muted(`not installed — ${command(`greatping setup ${host.id}`)}`),
-  ]);
+  checks.push(['Skill', skillCheck(host.id, fix, problems)]);
   return checks;
+}
+
+function skillCheck(id: HostId, fix: boolean, problems: string[]): string {
+  let state: SkillState;
+  try {
+    state = skillState(id);
+    if (fix && state === 'outdated') {
+      installSkill(id);
+      state = skillState(id);
+    }
+  } catch (error) {
+    problems.push(`Skill: ${error instanceof Error ? error.message : String(error)}`);
+    return bad('cannot be checked');
+  }
+  switch (state) {
+    case 'absent':
+      return muted(`not installed — ${command(`greatping setup ${id}`)}`);
+    case 'current':
+      return ok('installed');
+    case 'outdated':
+      return warn(`update available ${muted(`— ${command('greatping doctor --fix')}`)}`);
+    case 'managed':
+      return ok(
+        `installed with npx skills ${muted(`— update with ${command('npx skills update greatping --global')}`)}`,
+      );
+    case 'modified':
+      return warn(`edited locally; kept as is ${muted(`(${skillDir(id)})`)}`);
+    case 'external':
+      return ok(`installed ${muted('(not by GreatPing)')}`);
+    case 'foreign':
+      return warn(`another skill occupies ${skillDir(id)}`);
+  }
 }
 
 export async function doctor(options: { fix: boolean; verbose?: boolean }): Promise<number> {

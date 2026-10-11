@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { SERVICE_ORIGIN } from '@greatping/protocol';
-import { api } from '../src/api.ts';
+import { ApiError, api } from '../src/api.ts';
 import { ask } from '../src/commands/ask.ts';
 import {
   configPath,
@@ -219,6 +219,40 @@ test('ask accepts own words only next to choices', async () => {
     ask('Which region?', { allowText: true }),
     /--allow-text together with --choices/,
   );
+});
+
+test('API failures retain other error behavior and do not infer upgrades from English text', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const [status, code, message, expected] of [
+      [401, 'unauthorized', 'revoked', 'This computer is no longer paired with GreatPing.'],
+      [429, 'rate_limited', 'wait', 'Too many requests. Try again in a minute.'],
+      [
+        503,
+        'http_error',
+        'unavailable',
+        'GreatPing is having trouble right now. Try again shortly.',
+      ],
+      [
+        400,
+        'invalid_request',
+        'this version of GreatPing is out of date',
+        'This version of GreatPing is out of date',
+      ],
+      [426, 'http_error', 'update the app', 'Update the app'],
+    ]) {
+      globalThis.fetch = async () => Response.json({ error: { code, message } }, { status });
+      await assert.rejects(api({ apiUrl: DEFAULT_API_URL }, 'GET', '/machine/me'), (error) => {
+        assert.ok(error instanceof ApiError);
+        assert.equal(error.status, status);
+        assert.equal(error.code, code);
+        assert.equal(error.message, expected);
+        return true;
+      });
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('a real redirect response cannot forward a credential or trigger a second request', async () => {

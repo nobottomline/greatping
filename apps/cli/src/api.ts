@@ -1,6 +1,7 @@
 import { PROJECT_COMMANDS_HEADER, PROJECT_LABELS_HEADER } from '@greatping/protocol';
 import { type Config, requireServer } from './config';
 import { rememberProjectLabels } from './identity';
+import { updateHint } from './update-instructions';
 import { VERSION } from './version';
 
 /** API failure with the server's error code when there is one. */
@@ -27,7 +28,13 @@ export async function api<T>(
   config: Config,
   method: string,
   path: string,
-  options: { body?: unknown; token?: string | null; signal?: AbortSignal } = {},
+  options: {
+    body?: unknown;
+    token?: string | null;
+    signal?: AbortSignal;
+    /** Settings previews must not update caches or mark queued project commands. */
+    updateLocalSettings?: boolean;
+  } = {},
 ): Promise<T> {
   requireServer(config);
   const token = options.token === undefined ? config.machineToken : options.token;
@@ -66,9 +73,14 @@ export async function api<T>(
   // The service reports the computer's project-label mode with each alert, so
   // a change made on a device applies from the next alert on.
   const mode = response.headers.get(PROJECT_LABELS_HEADER);
-  if (mode === 'folder' || mode === 'hidden') rememberProjectLabels(mode);
+  if (options.updateLocalSettings !== false && (mode === 'folder' || mode === 'hidden'))
+    rememberProjectLabels(mode);
   // A device renamed or hid a project: the caller fetches the commands.
-  if (Number(response.headers.get(PROJECT_COMMANDS_HEADER) ?? 0) > 0) commandsWaiting = true;
+  if (
+    options.updateLocalSettings !== false &&
+    Number(response.headers.get(PROJECT_COMMANDS_HEADER) ?? 0) > 0
+  )
+    commandsWaiting = true;
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
@@ -77,6 +89,10 @@ function describe(status: number, code: string, message?: string): string {
   if (status === 401) return 'This computer is no longer paired with GreatPing.';
   if (status === 429) return 'Too many requests. Try again in a minute.';
   if (status >= 500) return 'GreatPing is having trouble right now. Try again shortly.';
+  // Older servers prescribe npm, which may update a different installed copy.
+  // Interpret the stable error code locally, including for JSON and MCP callers.
+  if (code === 'client_outdated')
+    return `This version of GreatPing is out of date. ${updateHint()}`;
   if (message) return message.charAt(0).toUpperCase() + message.slice(1);
   return `Request failed (${status} ${code}).`;
 }

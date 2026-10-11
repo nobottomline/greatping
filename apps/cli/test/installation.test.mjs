@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -14,6 +16,8 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
+import { ApiError, api } from '../src/api.ts';
+import { DEFAULT_API_URL } from '../src/config.ts';
 import { detectInstallation, managerOutput, verifyRemoval } from '../src/installation.ts';
 import { currentLauncher } from '../src/integrations/launcher.ts';
 import { executeRemoval } from '../src/integrations/removal.ts';
@@ -97,8 +101,50 @@ async function sandbox(run) {
   }
 }
 
+async function outdatedAdvice(script, env, updateCommand) {
+  const saved = [process.argv[1], process.env, globalThis.fetch];
+  const hint = updateCommand
+    ? `Update with ${updateCommand}`
+    : 'Update this installation using its original package manager or source checkout.';
+  try {
+    process.argv[1] = script;
+    process.env = { ...env };
+    // Both old servers with hard-coded npm advice and future neutral/absent
+    // messages must work. Detection must not perform a registry lookup.
+    for (const message of [
+      'this version of GreatPing is out of date; update it with npm install -g greatping@latest',
+      'This version of the GreatPing CLI is no longer supported. Update GreatPing using your original package manager or installation method.',
+      'upgrade required',
+      undefined,
+    ]) {
+      for (const path of ['/pair/start', '/requests']) {
+        let calls = 0;
+        globalThis.fetch = async (url) => {
+          calls++;
+          assert.equal(url, `${DEFAULT_API_URL}/v1${path}`);
+          return Response.json({ error: { code: 'client_outdated', message } }, { status: 426 });
+        };
+        await assert.rejects(
+          api({ apiUrl: DEFAULT_API_URL }, 'POST', path, { token: null }),
+          (error) => {
+            assert.ok(error instanceof ApiError);
+            assert.equal(error.status, 426);
+            assert.equal(error.code, 'client_outdated');
+            assert.equal(error.message, `This version of GreatPing is out of date. ${hint}`);
+            assert.equal(error.message.includes(String.fromCharCode(27)), false);
+            return true;
+          },
+        );
+        assert.equal(calls, 1);
+      }
+    }
+  } finally {
+    [process.argv[1], process.env, globalThis.fetch] = saved;
+  }
+}
+
 test('global manager evidence produces the correct update and removal commands', () =>
-  sandbox(({ home, bin, env }) => {
+  sandbox(async ({ home, bin, env }) => {
     const cases = [
       [
         'npm',
@@ -129,11 +175,12 @@ test('global manager evidence produces the correct update and removal commands',
       assert.ok(installation.updateCommand.startsWith(update));
       assert.equal(installation.removal.executable, join(bin, executable));
       assert.ok(installation.removal.args.includes('greatping'));
+      await outdatedAdvice(script, env, installation.updateCommand);
     }
   }));
 
 test('Vite+ metadata and shared shim identify the selected installation and stable hook launcher', () =>
-  sandbox(({ home, bin, env }) => {
+  sandbox(async ({ home, bin, env }) => {
     const store = join(home, 'custom-vp-data/packages/greatping');
     const id = '2715ef2b-1831-40e2-9d40-69121bf6c137';
     const script = entry(join(store, id, 'lib/node_modules/greatping'));
@@ -150,6 +197,7 @@ test('Vite+ metadata and shared shim identify the selected installation and stab
     assert.equal(installation.updateCommand, 'vp install -g greatping@latest');
     assert.deepEqual(installation.removal.args, ['uninstall', '-g', 'greatping']);
     assert.equal(installation.launcher, join(bin, 'greatping'));
+    await outdatedAdvice(script, childEnv, 'vp install -g greatping@latest');
     const previous = [process.argv[1], process.env.PATH];
     try {
       process.argv[1] = script;
@@ -166,6 +214,7 @@ test('Vite+ metadata and shared shim identify the selected installation and stab
       json(`${store}.json`, value);
       assert.equal(detectInstallation(script, env).manager, 'unknown');
       assert.equal(detectInstallation(script, env).removal, null);
+      await outdatedAdvice(script, env, null);
     }
     json(`${store}.json`, metadata);
     rmSync(join(bin, 'greatping'));
@@ -174,18 +223,93 @@ test('Vite+ metadata and shared shim identify the selected installation and stab
   }));
 
 test('project installs, checkouts, malformed manifests and missing managers are preserved', () =>
-  sandbox(({ home, env }) => {
+  sandbox(async ({ home, env }) => {
     for (const root of [join(home, 'project/node_modules/greatping'), join(home, 'checkout')]) {
       const script = entry(root);
       mkdirSync(join(root, 'src'));
       assert.equal(detectInstallation(script, env).manager, 'local');
       assert.equal(detectInstallation(script, env).removal, null);
+      await outdatedAdvice(script, env, null);
       json(join(root, 'package.json'), { name: 'other', bin: { greatping: './dist/index.js' } });
       assert.equal(detectInstallation(script, env).manager, 'unknown');
+      await outdatedAdvice(script, env, null);
     }
     const script = entry(join(home, 'prefix/lib/node_modules/greatping'));
     assert.equal(detectInstallation(script, env).manager, 'npm');
     assert.equal(detectInstallation(script, env).removal, null);
+  }));
+
+test('built Vite+ login failures and update checks agree without executing a manager or saving pairing', () =>
+  sandbox(({ home, bin, env }) => {
+    const store = join(home, 'packages/greatping');
+    const id = '2715ef2b-1831-40e2-9d40-69121bf6c137';
+    const root = join(store, id, 'lib/node_modules/greatping');
+    mkdirSync(root, { recursive: true });
+    cpSync(new URL('../dist', import.meta.url), join(root, 'dist'), { recursive: true });
+    cpSync(new URL('../package.json', import.meta.url), join(root, 'package.json'));
+    symlinkSync(new URL('../node_modules', import.meta.url).pathname, join(root, 'node_modules'));
+    const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    json(`${store}.json`, { name: 'greatping', version, installId: id, bins: ['greatping'] });
+    const managerLog = join(home, 'manager-called');
+    const managerCode = `require('node:fs').writeFileSync(${JSON.stringify(managerLog)}, 'called')`;
+    const vp = tool(bin, 'vp', managerCode);
+    tool(bin, 'npm', managerCode);
+    symlinkSync(vp, join(bin, 'greatping'));
+    const preload = `
+      globalThis.fetch = async (url) => {
+        if (url === 'https://registry.npmjs.org/-/package/greatping/dist-tags')
+          return Response.json({ latest: '99.0.0' });
+        if (url !== ${JSON.stringify(`${DEFAULT_API_URL}/v1/pair/start`)})
+          throw new Error('Unexpected hosted request');
+        return Response.json({ error: { code: 'client_outdated',
+          message: 'this version of GreatPing is out of date; update it with npm install -g greatping@latest'
+        } }, { status: 426 });
+      };
+    `;
+    const run = (...args) =>
+      spawnSync(
+        process.execPath,
+        [
+          '--import',
+          `data:text/javascript,${encodeURIComponent(preload)}`,
+          join(root, 'dist/index.js'),
+          ...args,
+        ],
+        {
+          cwd: home,
+          env: {
+            ...env,
+            XDG_CONFIG_HOME: join(home, '.config'),
+            NO_COLOR: '1',
+            NO_UPDATE_NOTIFIER: '1',
+          },
+          encoding: 'utf8',
+          timeout: 10000,
+        },
+      );
+    const login = run('login');
+    assert.equal(login.error, undefined);
+    assert.equal(login.status, 1, login.stderr);
+    assert.equal(login.stdout, '');
+    assert.match(
+      login.stderr,
+      /This version of GreatPing is out of date\. Update with vp install -g greatping@latest/,
+    );
+    assert.doesNotMatch(login.stderr, /npm install|Pair this computer|greatping logout/);
+    assert.equal(login.stderr.includes(String.fromCharCode(27)), false);
+    assert.equal(existsSync(join(home, '.config/greatping/config.json')), false);
+    const check = run('update', '--json');
+    assert.equal(check.status, 0, check.stderr);
+    assert.equal(check.stderr, '');
+    assert.deepEqual(JSON.parse(check.stdout).installation, {
+      manager: 'vite-plus',
+      updateCommand: 'vp install -g greatping@latest',
+    });
+    const human = run('update');
+    assert.equal(human.status, 0, human.stderr);
+    assert.equal(human.stdout, '');
+    assert.match(human.stderr, /Update with vp install -g greatping@latest/);
+    assert.equal(existsSync(managerLog), false);
   }));
 
 test('npm ownership preflight refuses the wrong root before any mutation', () =>

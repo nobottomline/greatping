@@ -1,6 +1,6 @@
 {
   "name": "greatping",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Get an alert on your phone when your coding agent needs you",
   "keywords": [
     "cli",
@@ -41,6 +41,7 @@
     "test:package": "pnpm build && node test/package-smoke.mjs"
   },
   "dependencies": {
+    "@clack/prompts": "1.8.1",
     "@modelcontextprotocol/server": "2.3.1",
     "@noble/ciphers": "^2.4.0",
     "@noble/curves": "^2.4.0",

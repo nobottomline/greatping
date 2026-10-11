@@ -293,3 +293,22 @@ test('direct removal preserves native plugin registration and completion prefere
     assert.equal(inspectPlugin('claude').finished, true);
     assert.equal(existsSync(join(env.CLAUDE_CONFIG_DIR, 'plugins/installed_plugins.json')), true);
   }));
+
+test('doctor reports an outdated bundled skill, updates it with --fix and keeps edits', async (t) =>
+  fixture(t, async ({ env, invoke }) => {
+    const { bundledSkill, installSkill } = await import('../src/integrations/skill.ts');
+    const file = join(env.CLAUDE_CONFIG_DIR, 'skills/greatping/SKILL.md');
+    installSkill('claude', '---\nname: greatping\ndescription: an older release\n---\n');
+    const checked = invoke(['doctor']);
+    assert.match(checked.stderr, /Skill\s+▲ update available — greatping doctor --fix/);
+    assert.match(readFileSync(file, 'utf8'), /an older release/);
+    invoke(['doctor', '--fix']);
+    assert.equal(readFileSync(file, 'utf8'), bundledSkill());
+    assert.match(invoke(['doctor']).stderr, /Skill\s+✔ installed/);
+
+    // An edited copy is reported and kept, even by --fix.
+    writeFileSync(file, `${bundledSkill()}\nMy rule.\n`);
+    invoke(['doctor', '--fix']);
+    assert.match(readFileSync(file, 'utf8'), /My rule/);
+    assert.match(invoke(['doctor']).stderr, /edited locally; kept as is/);
+  }));

@@ -96,7 +96,14 @@ export async function status(options: { json?: boolean }): Promise<number> {
         claudeHooks: claude,
         integrations,
         plugins,
-        keys: config.keys && config.manifest ? { manifestVersion: config.manifest.version } : null,
+        keys:
+          config.keys && config.manifest
+            ? {
+                manifestVersion: config.manifest.version,
+                // The phone shows this computer as waiting until it has the final tag.
+                confirmation: config.pendingCeremonyTag ? 'pending' : 'sent',
+              }
+            : null,
         // Questions, messages, project names and answers are sealed end to end.
         encryption: config.keys && config.manifest ? 'end-to-end' : null,
         error: problem,
@@ -149,6 +156,9 @@ export async function status(options: { json?: boolean }): Promise<number> {
 /** Whether this computer holds keys its devices vouched for (docs/device-keys.md). */
 function keysSummary(config: Config): string {
   if (!config.keys || !config.manifest)
-    return `${color.yellow('none')} ${muted('— paired before keys; greatping logout, then greatping login')}`;
-  return `verified, alerts end-to-end encrypted ${muted(`(account manifest v${config.manifest.version})`)}`;
+    return `${color.yellow('none')} ${muted('— paired with an earlier version; greatping logout, then greatping login')}`;
+  const verified = `verified, alerts end-to-end encrypted ${muted(`(account manifest v${config.manifest.version})`)}`;
+  return config.pendingCeremonyTag
+    ? `${verified} ${color.yellow('· confirmation not sent to your phone yet')} ${muted('— greatping login')}`
+    : verified;
 }

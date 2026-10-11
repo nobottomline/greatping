@@ -22,7 +22,16 @@ export interface Config {
   keys?: { sign: string; enc: string };
   /** The latest account manifest version this computer verified. */
   manifest?: Manifest;
+  /** Exact final tag awaiting acknowledgement; replayed without another ceremony. */
+  pendingCeremonyTag?: string;
 }
+
+/**
+ * The manifest encoding this CLI verifies (docs/pairing-v2.md). A manifest
+ * saved without it was pinned by CLI 0.4 or earlier under the v1 encoding,
+ * whose pairings nobody confirmed: it is ignored and the computer pairs again.
+ */
+const MANIFEST_ENCODING = 2;
 
 export function configDir(): string {
   const base =
@@ -64,8 +73,17 @@ export function loadConfig(): Config {
   if (keys && typeof keys.sign === 'string' && typeof keys.enc === 'string')
     config.keys = { sign: keys.sign, enc: keys.enc };
   // Re-verified against the chain whenever it is used; a damaged one is dropped.
-  if (saved.manifest && typeof saved.manifest === 'object')
+  if (
+    saved.manifest &&
+    typeof saved.manifest === 'object' &&
+    saved.manifestEncoding === MANIFEST_ENCODING
+  )
     config.manifest = saved.manifest as Manifest;
+  if (
+    typeof saved.pendingCeremonyTag === 'string' &&
+    /^[A-Za-z0-9_-]{86}$/.test(saved.pendingCeremonyTag)
+  )
+    config.pendingCeremonyTag = saved.pendingCeremonyTag;
   return config;
 }
 
@@ -83,7 +101,8 @@ export function requireServer(config: Config): void {
 export function saveConfig(config: Config): void {
   const dir = configDir();
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
-  writeFileSync(configPath(), JSON.stringify(config, null, 2), { encoding: 'utf-8', mode: 0o600 });
+  const saved = config.manifest ? { ...config, manifestEncoding: MANIFEST_ENCODING } : config;
+  writeFileSync(configPath(), JSON.stringify(saved, null, 2), { encoding: 'utf-8', mode: 0o600 });
   chmodSync(configPath(), 0o600);
 }
 

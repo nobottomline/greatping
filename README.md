@@ -24,8 +24,16 @@ An automatic source sync does not publish a new npm version.
 
 `greatping update --check` checks npm now and shows how to update the running
 installation. Interactive update notices use the detected package manager.
+Unsupported-client errors use the same installation-specific update advice.
 If Vite+ owns your command, use `vp install -g greatping@latest`; Vite+ global
 packages and npm global packages are separate installations.
+
+### Upgrading from 0.4.x or earlier
+
+CLI 0.5.0 uses pairing v2 and requires a compatible GreatPing app. Existing
+computers must run `greatping logout`, then `greatping login` to pair again.
+If the app reports "Set up GreatPing again", complete fresh account setup there
+first: legacy v1 account manifests cannot be migrated by updating the CLI.
 
 ## How it works
 
@@ -46,7 +54,7 @@ Hook alerts carry fixed text only: nothing from a prompt (questions, commands, f
 
 ## The skill
 
-The agent skill is in [`skills/greatping`](skills/greatping/SKILL.md). `greatping setup` offers skill installation as a separate step through the interactive `npx skills` installer. For other agents:
+The agent skill is in [`skills/greatping`](skills/greatping/SKILL.md). `greatping setup` can install its bundled copy offline for each selected agent. Review the plan before applying it; `greatping doctor` reports available updates and `greatping doctor --fix` updates unchanged copies owned by this installation. For other agents, the optional `npx skills` installer remains available:
 
 ```bash
 npx skills add nobottomline/greatping

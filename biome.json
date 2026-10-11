@@ -14,7 +14,10 @@
       "!**/.expo",
       "!**/.turbo",
       "!**/*.tsbuildinfo",
-      "!packages/protocol/test/vectors"
+      "!packages/protocol/test/vectors",
+      "!**/.next",
+      "!**/.source",
+      "!apps/web/out"
     ]
   },
   "formatter": {
@@ -96,5 +99,10 @@
         }
       }
     }
-  ]
+  ],
+  "css": {
+    "parser": {
+      "tailwindDirectives": true
+    }
+  }
 }

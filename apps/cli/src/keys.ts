@@ -1,17 +1,13 @@
-import type { CeremonyResponse, ManifestsResponse } from '@greatping/protocol';
+import type { ManifestsResponse } from '@greatping/protocol';
 import {
-  finishCeremony,
   generateKeys,
-  type InitiatorState,
   type Manifest,
   type MemberKeys,
-  manifestHash,
   toBase64Url,
-  verifyChain,
   verifyNext,
 } from '@greatping/protocol/crypto';
 import { api } from './api';
-import { type Config, isPaired, saveConfig } from './config';
+import { type Config, isPaired, loadConfig, saveConfig } from './config';
 
 /**
  * This computer's keys and its view of the account manifest
@@ -28,36 +24,6 @@ export function newMachineKeys(): { secret: NonNullable<Config['keys']>; public:
     secret: { sign: toBase64Url(keys.secret.sign), enc: toBase64Url(keys.secret.enc) },
     public: keys.public,
   };
-}
-
-/**
- * Checks the approving device's answer at the end of pairing and returns the
- * computer's confirmation tag with the verified manifest. Throws when anything
- * does not match: the secret half, the keys, the chain or this computer's
- * place in it.
- */
-export function verifyPairing(input: {
-  state: InitiatorState;
-  ceremony: CeremonyResponse;
-  manifests: Manifest[];
-  accountId: string;
-  machineId: string;
-  keys: MemberKeys;
-}): { tag: string; manifest: Manifest } {
-  const { tag } = finishCeremony(input.state, input.ceremony);
-  const latest = verifyChain(input.manifests, input.accountId, Date.now());
-  const vouched = input.manifests.find((m) => manifestHash(m) === input.ceremony.manifestHash);
-  const me = latest.members.find((m) => m.id === input.machineId);
-  if (
-    !vouched ||
-    vouched.signer !== input.ceremony.device ||
-    !me ||
-    me.kind !== 'computer' ||
-    me.sign.key !== input.keys.sign.key ||
-    me.enc.key !== input.keys.enc.key
-  )
-    throw new Error('the manifest does not hold this computer');
-  return { tag, manifest: latest };
 }
 
 export type ManifestState =
@@ -106,4 +72,26 @@ function stateOf(machineId: string, manifest: Manifest): ManifestState {
   return manifest.members.some((m) => m.id === machineId)
     ? { status: 'current', version: manifest.version }
     : { status: 'removed', version: manifest.version };
+}
+
+/** Replays a saved final confirmation; only an acknowledgement clears it. */
+export async function confirmPendingCeremony(config: Config, signal?: AbortSignal): Promise<void> {
+  const tag = config.pendingCeremonyTag;
+  if (!tag || !isPaired(config)) return;
+  await api(config, 'POST', '/machine/me/ceremony', {
+    body: { tag },
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(5000)])
+      : AbortSignal.timeout(5000),
+  });
+  signal?.throwIfAborted();
+  const { pendingCeremonyTag, ...saved } = loadConfig();
+  if (
+    saved.machineId !== config.machineId ||
+    saved.machineToken !== config.machineToken ||
+    pendingCeremonyTag !== tag
+  )
+    throw new Error('Local pairing changed while confirming. Run greatping login again.');
+  saveConfig(saved);
+  delete config.pendingCeremonyTag;
 }

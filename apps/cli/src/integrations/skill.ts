@@ -11,7 +11,7 @@ import {
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { managedSkillInstalled } from './managed-skills';
+import { canonicalSkillPath, managedSkillInstalled } from './managed-skills';
 import { nativeHome } from './native-adapters';
 import { fingerprint, forgetAsset, ownedAssets, recordAsset } from './ownership';
 import { claudeHome } from './plugins';
@@ -57,25 +57,71 @@ export function skillInstalled(host: HostId): boolean {
   return isGreatPingSkill(skillDir(host));
 }
 
+/**
+ * Who owns a host's GreatPing skill and whether it matches this CLI.
+ * - `current`/`outdated`: the bundled copy, unchanged since this CLI wrote it
+ *   (or a recognized legacy bundled copy), matching this CLI or an older one.
+ * - `modified`: the bundled copy, edited afterwards; it is never overwritten.
+ * - `managed`: installed through `npx skills`, which also updates it.
+ * - `external`: a GreatPing skill installed some other way; left alone.
+ * - `foreign`: another skill, or a broken link, occupies the directory.
+ */
+export type SkillState =
+  | 'absent'
+  | 'current'
+  | 'outdated'
+  | 'modified'
+  | 'managed'
+  | 'external'
+  | 'foreign';
+
+const legacySkillHashes = new Set([
+  'a93d2819e14345dc306ec3621d814f533b9a6683ce2e830a576df88a1bc4c5d3',
+]);
+const sha256 = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+
+/** A plain directory holding only an unchanged legacy bundled SKILL.md. */
+function bundledCopy(dir: string): boolean {
+  if (lstatSync(dir).isSymbolicLink() || !lstatSync(dir).isDirectory()) return false;
+  if (readdirSync(dir).join() !== 'SKILL.md') return false;
+  if (!lstatSync(join(dir, 'SKILL.md')).isFile()) return false;
+  const hash = sha256(readFileSync(join(dir, 'SKILL.md')));
+  return legacySkillHashes.has(hash);
+}
+
+export function skillState(host: HostId, content = bundledSkill()): SkillState {
+  const dir = skillDir(host);
+  if (!lstatSync(dir, { throwIfNoEntry: false })) return 'absent';
+  if (!isGreatPingSkill(dir)) return 'foreign';
+  const link = lstatSync(dir).isSymbolicLink();
+  if (managedSkillInstalled() && (link || dir === canonicalSkillPath())) return 'managed';
+  const owned = ownedAssets().find((asset) => asset.kind === 'skill' && asset.path === dir);
+  if (owned?.fingerprint && fingerprint(dir) !== owned.fingerprint) return 'modified';
+  // An old journal entry without a hash grants no more ownership than an
+  // unrecorded copy. Never follow a skill link when writing an update.
+  if (link || !lstatSync(join(dir, 'SKILL.md')).isFile()) return 'external';
+  if (!owned?.fingerprint && !bundledCopy(dir)) return 'external';
+  return readFileSync(join(dir, 'SKILL.md'), 'utf8') === content ? 'current' : 'outdated';
+}
+
+/**
+ * Installs or updates the bundled skill. A skill managed by `npx skills` or
+ * installed another way is left as it is; edited or foreign files are an error.
+ */
 export function installSkill(host: HostId, content = bundledSkill()): void {
   const dir = skillDir(host);
-  if (managedSkillInstalled() && isGreatPingSkill(dir)) return;
-  // A link from `npx skills` already points at a GreatPing skill; replacing it
-  // would fork that install.
-  if (existsSync(dir) && lstatSync(dir).isSymbolicLink() && isGreatPingSkill(dir)) return;
-  if (existsSync(dir) && !isGreatPingSkill(dir)) throw new Error(`Another skill occupies ${dir}.`);
-  const existing = ownedAssets().find((asset) => asset.kind === 'skill' && asset.path === dir);
-  if (existing?.fingerprint && existsSync(dir) && fingerprint(dir) !== existing.fingerprint)
-    throw new Error(`The installed skill was changed: ${dir}.`);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'SKILL.md'), content, { mode: 0o644 });
+  const state = skillState(host, content);
+  if (state === 'managed' || state === 'external') return;
+  if (state === 'foreign') throw new Error(`Another skill occupies ${dir}.`);
+  if (state === 'modified') throw new Error(`The installed skill was changed: ${dir}.`);
+  if (state !== 'current') {
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'SKILL.md'), content, { mode: 0o644 });
+  }
   recordAsset({ kind: 'skill', host, path: dir, fingerprint: fingerprint(dir) });
 }
 
 /** Removes the skill only when it is GreatPing's; returns whether it did. */
-const legacySkillHashes = new Set([
-  'a93d2819e14345dc306ec3621d814f533b9a6683ce2e830a576df88a1bc4c5d3',
-]);
 export function checkSkillRemoval(host: HostId): boolean {
   const dir = skillDir(host);
   if (!existsSync(dir)) {
@@ -86,15 +132,8 @@ export function checkSkillRemoval(host: HostId): boolean {
     if (owned) throw new Error(`The recorded skill was replaced or changed: ${dir}.`);
     return false;
   }
-  const legacy =
-    !lstatSync(dir).isSymbolicLink() &&
-    readdirSync(dir).length === 1 &&
-    legacySkillHashes.has(
-      createHash('sha256')
-        .update(readFileSync(join(dir, 'SKILL.md')))
-        .digest('hex'),
-    );
-  if (owned ? fingerprint(dir) !== owned.fingerprint : !legacy)
+  // Without a journal entry, only an unedited copy of a known release is ours.
+  if (owned ? fingerprint(dir) !== owned.fingerprint : !bundledCopy(dir))
     throw new Error(
       `Skill ownership is unknown or files changed: ${dir}. Remove it through its installer.`,
     );

@@ -5,6 +5,39 @@ Unreleased are not available merely by installing npm `latest`.
 
 ## Unreleased
 
+## 0.5.0 — 2026-10-11
+
+- **Breaking: pairing v2.** The phone checks the computer's proof of the code
+  before signing its membership. A mistyped code or substituted keys end the
+  pairing without adding a member. Requires the matching service and app;
+  computers paired by CLI 0.4 or earlier must run `greatping logout`, then
+  `greatping login`. Accounts with legacy v1 manifests need fresh setup in the
+  app before computers can pair again; upgrading the CLI alone does not migrate
+  those accounts.
+- Save the final pairing confirmation before sending it. If acknowledgement
+  is interrupted, `status` reports the pending confirmation and `login` or the
+  next computer report retries it without starting another pairing.
+- Show installation-specific update instructions when the service rejects an
+  outdated CLI, including during login. Vite+ users receive
+  `vp install -g greatping@latest`; other recognized installs use their owning
+  manager, and unknown installs retain manual guidance. Reuse the same advice
+  as update notices and `greatping update`, without a registry lookup.
+  The service's fallback message also directs older CLIs to their original
+  package manager or installation method instead of prescribing npm.
+- Redesign interactive `setup` as one reviewed plan for every agent (Claude
+  Code, Codex, OpenCode, Pi, Cursor IDE): choose agents, inspect or customize
+  each agent and Apply or Cancel. Clack handles terminal navigation; previews
+  never write caches or consume project commands, and integration conflicts
+  remain visible. Unselected agents keep their configuration.
+- Install the GreatPing skill offline from the CLI for the agents setup
+  configures, chosen per agent in the setup plan. `npx skills` remains an
+  optional row for any other agent instead of the only path.
+- Keep a bundled skill current: setup marks an update, `doctor` reports it,
+  `doctor --fix` applies it and `login` offers it. Edited copies, other
+  installs and `npx skills` installs are never overwritten.
+- Update MCP server and WebSocket dependencies. The installed CLI still
+  requires Node.js 22.20 or later.
+
 ## 0.4.0 — 2026-10-07
 
 - Use the production GreatPing service. Existing development pairings must be

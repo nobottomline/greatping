@@ -25,7 +25,12 @@ export const REMOVAL_COOLING_OFF_MS = 72 * 3600 * 1000;
 /** How far a version's `createdAt` may be ahead of the verifier's clock. */
 export const MAX_CLOCK_SKEW_MS = 5 * 60 * 1000;
 
-const TAG = utf8('GreatPing manifest v1');
+/**
+ * The encoding tag. v2 accompanies pairing and linking v2 (docs/pairing-v2.md):
+ * versions signed under v1 could add members whose keys nobody had confirmed,
+ * so v2 verifiers reject them and such accounts start over.
+ */
+const TAG = utf8('GreatPing manifest v2');
 
 export type MemberKind = 'device' | 'computer';
 export type ManifestOp = 'genesis' | 'add' | 'remove' | 'rotate';

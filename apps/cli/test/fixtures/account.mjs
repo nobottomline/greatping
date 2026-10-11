@@ -50,6 +50,7 @@ export function pairedConfig(apiUrl, extra = {}) {
     machineToken: 'PRIVATE TOKEN',
     keys: { sign: toBase64Url(computer.secret.sign), enc: toBase64Url(computer.secret.enc) },
     manifest,
+    manifestEncoding: 2,
     ...extra,
   };
 }

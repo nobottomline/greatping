@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { configDir } from './config';
 import { detectInstallation } from './installation';
 import { command, interactive, muted, spinner, ui } from './ui';
+import { updateHint } from './update-instructions';
 import { VERSION } from './version';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -112,13 +113,6 @@ async function latestVersion(signal?: AbortSignal): Promise<string> {
   }
 }
 
-function updateHint(): string {
-  const installation = detectInstallation();
-  return installation.updateCommand
-    ? `Update with ${command(installation.updateCommand)}`
-    : 'Update this installation using its original package manager or source checkout.';
-}
-
 /** Explicit checks bypass the cache and opt-out; they never install a package. */
 export async function checkForUpdates(options: { json: boolean }): Promise<number> {
   const controller = new AbortController();
@@ -172,7 +166,7 @@ export async function checkForUpdates(options: { json: boolean }): Promise<numbe
       ]);
       if (updateAvailable) {
         ui.info('An update is available.');
-        ui.next(updateHint());
+        ui.next(updateHint(command));
       } else
         ui.success(
           newer(VERSION, latest) ? 'This version is ahead of npm latest.' : 'You are up to date.',
@@ -287,6 +281,6 @@ export function prepareUpdateNotice(argv: string[]): () => void | Promise<void> 
       return;
     ui.blank();
     ui.info(`Update available ${muted(VERSION)} → ${cache.latest}`);
-    ui.next(updateHint());
+    ui.next(updateHint(command));
   };
 }

@@ -7,6 +7,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   utimesSync,
   writeFileSync,
 } from 'node:fs';
@@ -14,7 +15,8 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { api } from '../src/api.ts';
+import { api, takeCommandsWaiting } from '../src/api.ts';
+import { detectAgents, steps } from '../src/commands/setup-flow.ts';
 import { DEFAULT_API_URL } from '../src/config.ts';
 import {
   cachedProjectLabels,
@@ -38,7 +40,12 @@ import {
 } from '../src/integrations/launcher.ts';
 import { codexMcpServer } from '../src/integrations/mcp.ts';
 import { runSteps } from '../src/integrations/runner.ts';
-import { installSkill, skillInstalled, uninstallSkill } from '../src/integrations/skill.ts';
+import {
+  installSkill,
+  skillInstalled,
+  skillState,
+  uninstallSkill,
+} from '../src/integrations/skill.ts';
 import {
   claimReport,
   forget,
@@ -95,10 +102,12 @@ async function withHome(run) {
     HOME: process.env.HOME,
     XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME,
     CODEX_HOME: process.env.CODEX_HOME,
+    CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
   };
   process.env.HOME = root;
   process.env.XDG_CONFIG_HOME = join(root, '.config');
   process.env.CODEX_HOME = join(root, '.codex');
+  process.env.CLAUDE_CONFIG_DIR = join(root, '.claude');
   try {
     await run(root);
   } finally {
@@ -461,6 +470,105 @@ test('the skill installs for each host and removes only itself', async () => {
   });
 });
 
+test('setup updates its own unedited skill and leaves every other copy alone', async () => {
+  await withHome((root) => {
+    const older = '---\nname: greatping\ndescription: older\n---\n';
+    const newer = '---\nname: greatping\ndescription: newer\n---\n';
+    const file = join(root, '.claude', 'skills', 'greatping', 'SKILL.md');
+    assert.equal(skillState('claude', newer), 'absent');
+    installSkill('claude', older);
+    assert.equal(skillState('claude', older), 'current');
+    assert.equal(skillState('claude', newer), 'outdated');
+    installSkill('claude', newer);
+    assert.equal(readFileSync(file, 'utf8'), newer);
+    assert.equal(skillState('claude', newer), 'current');
+
+    // An edit is the user's: it is reported and never overwritten or removed.
+    writeFileSync(file, `${newer}\nMy own rule.\n`);
+    assert.equal(skillState('claude', newer), 'modified');
+    assert.throws(() => installSkill('claude', newer), /was changed/);
+    assert.throws(() => uninstallSkill('claude'), /files changed/);
+    assert.match(readFileSync(file, 'utf8'), /My own rule/);
+
+    // Matching content alone does not authorize adopting a copy installed by hand.
+    const shared = join(root, '.agents', 'skills', 'greatping');
+    mkdirSync(shared, { recursive: true });
+    writeFileSync(join(shared, 'SKILL.md'), `${older}\nCopied by hand.\n`);
+    assert.equal(skillState('codex', newer), 'external');
+    installSkill('codex', newer);
+    assert.match(readFileSync(join(shared, 'SKILL.md'), 'utf8'), /Copied by hand/);
+    writeFileSync(join(shared, 'SKILL.md'), newer);
+    assert.equal(skillState('codex', newer), 'external');
+    installSkill('codex', newer);
+    assert.throws(() => uninstallSkill('codex'), /ownership is unknown/);
+    assert.equal(readFileSync(join(shared, 'SKILL.md'), 'utf8'), newer);
+
+    // npx skills owns its canonical copy and the links to it.
+    mkdirSync(shared, { recursive: true });
+    writeFileSync(join(shared, 'SKILL.md'), older);
+    writeFileSync(
+      join(root, '.agents', '.skill-lock.json'),
+      JSON.stringify({ version: 3, skills: { greatping: { source: 'nobottomline/greatping' } } }),
+    );
+    assert.equal(skillState('codex', newer), 'managed');
+    installSkill('codex', newer);
+    assert.equal(readFileSync(join(shared, 'SKILL.md'), 'utf8'), older);
+  });
+});
+
+test('skill setup reports malformed manager state and preserves installed files', async () => {
+  await withHome(async (root) => {
+    installSkill('claude');
+    const file = join(root, '.claude', 'skills', 'greatping', 'SKILL.md');
+    const original = readFileSync(file, 'utf8');
+    const lock = join(root, '.agents', '.skill-lock.json');
+    mkdirSync(join(root, '.agents'), { recursive: true });
+    writeFileSync(lock, '{broken');
+    const { agents, content } = detectAgents(['claude'], { skill: true });
+    const [agent] = agents;
+    assert.match(agent.warning, /cannot be read; the skill is left as it is/);
+    assert.doesNotMatch(agent.warning, /JSON|token/);
+    assert.equal(agent.skillState, null);
+    assert.equal(
+      steps(agent, content).some((step) => /skill/.test(step.label)),
+      false,
+    );
+    for (const step of steps(agent, content)) assert.equal(step.run(), null);
+    assert.equal(readFileSync(file, 'utf8'), original);
+    assert.equal(readFileSync(lock, 'utf8'), '{broken');
+  });
+});
+
+test('skill updates do not follow an unrecorded SKILL.md symlink', async () => {
+  await withHome((root) => {
+    const content = '---\nname: greatping\ndescription: current\n---\n';
+    const target = join(root, 'user-owned-skill.md');
+    const directory = join(root, '.claude', 'skills', 'greatping');
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(target, content);
+    symlinkSync(target, join(directory, 'SKILL.md'));
+    assert.equal(skillState('claude', content), 'external');
+    installSkill('claude', `${content}Updated.\n`);
+    assert.equal(readFileSync(target, 'utf8'), content);
+  });
+});
+
+test('a skill journal without a fingerprint does not authorize overwriting edits', async () => {
+  await withHome((root) => {
+    const content = '---\nname: greatping\ndescription: older\n---\n';
+    installSkill('claude', content);
+    const journal = join(root, '.config', 'greatping', 'installation.json');
+    const saved = JSON.parse(readFileSync(journal, 'utf8'));
+    for (const asset of saved.assets) delete asset.fingerprint;
+    writeFileSync(journal, JSON.stringify(saved));
+    const file = join(root, '.claude', 'skills', 'greatping', 'SKILL.md');
+    writeFileSync(file, `${content}My own rule.\n`);
+    assert.equal(skillState('claude', content), 'external');
+    installSkill('claude', `${content}Updated.\n`);
+    assert.match(readFileSync(file, 'utf8'), /My own rule/);
+  });
+});
+
 test('the bundled skill is valid for skill installers', async () => {
   const { bundledSkill } = await import('../src/integrations/skill.ts');
   const skill = bundledSkill();
@@ -820,6 +928,36 @@ test('every service answer carrying the project-label mode updates the cached mo
       assert.equal(cachedProjectLabels(), 'hidden');
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+test('a settings preview does not cache headers or mark project commands as waiting', async () => {
+  await withHome(async (root) => {
+    const originalFetch = globalThis.fetch;
+    takeCommandsWaiting();
+    globalThis.fetch = async () =>
+      Response.json(
+        {},
+        {
+          headers: {
+            'x-greatping-project-labels': 'folder',
+            'x-greatping-project-commands': '1',
+          },
+        },
+      );
+    try {
+      const config = { apiUrl: DEFAULT_API_URL, machineId: 'mch_1', machineToken: 'mc_x' };
+      await api(config, 'GET', '/machine/me', { updateLocalSettings: false });
+      assert.equal(cachedProjectLabels(), 'hidden');
+      assert.equal(existsSync(join(root, '.config', 'greatping', 'alerts.json')), false);
+      assert.equal(takeCommandsWaiting(), false);
+      await api(config, 'GET', '/machine/me');
+      assert.equal(cachedProjectLabels(), 'folder');
+      assert.equal(takeCommandsWaiting(), true);
+    } finally {
+      globalThis.fetch = originalFetch;
+      takeCommandsWaiting();
     }
   });
 });

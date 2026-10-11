@@ -107,7 +107,7 @@ export interface Device {
   lastPlace: Place | null;
   /** When this device may remove devices and computers that joined before it. */
   seniorAt: number;
-  /** This device's ceremony confirmation tag after it was linked; null before or without keys. */
+  /** This device's final ceremony tag `D` after it was linked (docs/pairing-v2.md); null before. */
   ceremonyTag: string | null;
 }
 
@@ -160,7 +160,7 @@ export interface Machine {
   projectLabels: ProjectLabels;
   lastAlertAt: number | null;
   alertsLast7Days: number;
-  /** The computer's ceremony confirmation tag after pairing; null before or without keys. */
+  /** The computer's final ceremony tag `D` after pairing (docs/pairing-v2.md); null before. */
   ceremonyTag: string | null;
   /** The manifest version the computer last reported using; null if it has not. */
   manifestVersion: number | null;
@@ -405,6 +405,11 @@ export interface MeResponse {
   routes: Route[];
   /** The account's latest manifest version; null for an account created before keys. */
   manifestVersion: number | null;
+  /**
+   * The chain predates pairing v2 (docs/pairing-v2.md): clients cannot trust
+   * it and the account starts over. Server data, so it only ever hides trust.
+   */
+  keysOutdated: boolean;
   /** Absent on older servers. No credential is ever used as an analytics identity. */
   analytics?: AccountAnalytics;
 }
@@ -577,17 +582,58 @@ const tagSchema = base64url(64);
 /** The CPace session id (16 random bytes) the initiator draws, as the share depends on it. */
 const sessionSchema = base64url(16);
 
-/** The approving device's answer, relayed to the initiator. */
+/**
+ * Pairing and linking v2 (docs/pairing-v2.md). The approving device answers
+ * with its share (M2); the initiator proves it knows the code with `Ta` (M3);
+ * only then does the device sign the version adding it and approve with `A`
+ * (M4); the initiator accepts with `D` (M5).
+ */
+
+/** The approving device's share and identity, relayed to the initiator. */
 export interface CeremonyResponse {
   share: string;
-  device: string;
+  accountId: string;
+  deviceId: string;
+}
+
+/** The approving device's approval, relayed to the initiator. */
+export interface CeremonyApproval {
   manifestHash: string;
   tag: string;
 }
 
-/** The initiator's confirmation tag, posted once it has verified the answer. */
+/** M2: the approving device answers the session of a lookup. */
+export const ceremonyRespondBodySchema = z.strictObject({
+  lookup: z.string().max(20),
+  share: shareSchema,
+});
+export type CeremonyRespondBody = z.infer<typeof ceremonyRespondBodySchema>;
+
+/** M3 (`Ta`, by the initiator with its poll secret) and M5 (`D`, with its new token). */
 export const ceremonyConfirmBodySchema = z.strictObject({ tag: tagSchema });
 export type CeremonyConfirmBody = z.infer<typeof ceremonyConfirmBodySchema>;
+
+/** M4: the version adding the initiator and its approval tag. */
+export const ceremonyApproveBodySchema = z.strictObject({
+  lookup: z.string().max(20),
+  manifest: manifestSchema,
+  tag: tagSchema,
+});
+export type CeremonyApproveBody = z.infer<typeof ceremonyApproveBodySchema>;
+
+/** The approving device ends a session: the tag did not match, or the user cancelled. */
+export const ceremonyAbortBodySchema = z.strictObject({
+  lookup: z.string().max(20),
+  reason: z.enum(['mismatch', 'cancelled']),
+});
+export type CeremonyAbortBody = z.infer<typeof ceremonyAbortBodySchema>;
+export type CeremonyAbortReason = CeremonyAbortBody['reason'];
+
+/** What the answering device reads while it waits for `Ta`. */
+export type CeremonyProgressResponse =
+  | { status: 'waiting' }
+  | { status: 'answered'; tag: string }
+  | { status: 'ended' };
 
 /** A new manifest version that changes no membership by itself (genesis, rotation, cleanup). */
 export const postManifestBodySchema = z.strictObject({ manifest: manifestSchema });
@@ -610,6 +656,7 @@ export const pairStartBodySchema = z.object({
   keys: memberKeysSchema,
   session: sessionSchema,
   share: shareSchema,
+  ceremony: z.literal(2),
 });
 export type PairStartBody = z.infer<typeof pairStartBodySchema>;
 
@@ -627,25 +674,23 @@ export interface PairStartResponse {
 export type PairPollResponse =
   | { status: 'pending' }
   | { status: 'expired' }
+  | { status: 'aborted'; reason: CeremonyAbortReason }
+  | {
+      /** A device answered; the computer sends `Ta` unless it already did. */
+      status: 'responded';
+      response: CeremonyResponse;
+      confirmed: boolean;
+    }
   | {
       status: 'approved';
       machineId: string;
       machineToken: string;
       accountId: string;
       deviceCount: number;
-      ceremony: CeremonyResponse;
+      approval: CeremonyApproval;
       /** The account's manifest chain from genesis. */
       manifests: ManifestPayload[];
     };
-
-export const pairApproveBodySchema = z.strictObject({
-  lookup: z.string(),
-  share: shareSchema,
-  tag: tagSchema,
-  /** The next version, adding this computer with the keys of the preview. */
-  manifest: manifestSchema,
-});
-export type PairApproveBody = z.infer<typeof pairApproveBodySchema>;
 
 export interface PairApproveResponse {
   machineName: string;
@@ -677,6 +722,7 @@ export const linkStartBodySchema = z.object({
   keys: memberKeysSchema,
   session: sessionSchema,
   share: shareSchema,
+  ceremony: z.literal(2),
 });
 export type LinkStartBody = z.infer<typeof linkStartBodySchema>;
 
@@ -693,12 +739,14 @@ export interface LinkStartResponse {
 export type LinkPollResponse =
   | { status: 'pending' }
   | { status: 'expired' }
+  | { status: 'aborted'; reason: CeremonyAbortReason }
+  | { status: 'responded'; response: CeremonyResponse; confirmed: boolean }
   | {
       status: 'approved';
       accountId: string;
       deviceId: string;
       deviceToken: string;
-      ceremony: CeremonyResponse;
+      approval: CeremonyApproval;
       manifests: ManifestPayload[];
     };
 
@@ -718,15 +766,6 @@ export interface LinkPreviewResponse {
   session: string;
   share: string;
 }
-
-export const linkApproveBodySchema = z.strictObject({
-  lookup: z.string(),
-  share: shareSchema,
-  tag: tagSchema,
-  /** The next version, adding this device with the keys of the preview. */
-  manifest: manifestSchema,
-});
-export type LinkApproveBody = z.infer<typeof linkApproveBodySchema>;
 
 export interface LinkApproveResponse {
   deviceName: string;

@@ -13,6 +13,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { configDir } from '../config';
+import type { ClaudeAlert } from './events';
 import { findOnPath, type Launcher, launcherProblem } from './launcher';
 import { fingerprint, forgetAsset, ownedAssets, recordAsset } from './ownership';
 import type { PluginState } from './plugins';
@@ -98,12 +99,7 @@ export function inspectNativeAdapter(id: NativeHost): PluginState {
         problem: 'Pi package filters are user-managed; inspect pi config before setup.',
       };
     state.path = adapterPath(id);
-    state.version = JSON.parse(
-      readFileSync(
-        join(state.path, id === 'cursor' ? '.cursor-plugin/plugin.json' : 'package.json'),
-        'utf8',
-      ),
-    ).version;
+    state.version = JSON.parse(readFileSync(join(state.path, manifestFile(id)), 'utf8')).version;
     const file = join(configDir(), 'plugins', `${id}.json`);
     if (!existsSync(file))
       return { ...state, status: 'unconfigured', problem: `Run greatping setup ${id}.` };
@@ -123,8 +119,7 @@ export function inspectNativeAdapter(id: NativeHost): PluginState {
     )
       throw new Error();
     state.finished = preferences.finished;
-    state.alerts =
-      id === 'cursor' ? [] : id === 'opencode' ? ['questions', 'permissions'] : ['tool-input'];
+    state.alerts = adapterAlerts(id);
     state.problem = launcherProblem(preferences.launcher.command, preferences.launcher.args);
     state.status = state.problem ? 'broken' : 'ready';
     return state;
@@ -206,6 +201,31 @@ function piPackage(action: 'install' | 'remove'): void {
   if (registered('pi') !== (action === 'install'))
     throw new Error(`pi ${action} did not update the expected native package registration.`);
 }
+/** What a native adapter alerts on besides finished turns; fixed by its host's events. */
+export function adapterAlerts(id: NativeHost): ClaudeAlert[] {
+  return id === 'cursor' ? [] : id === 'opencode' ? ['questions', 'permissions'] : ['tool-input'];
+}
+const manifestFile = (id: NativeHost) =>
+  id === 'cursor' ? '.cursor-plugin/plugin.json' : 'package.json';
+function adapterSource(id: NativeHost): string | undefined {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return [
+    join(here, 'adapters', id, 'greatping'),
+    join(here, '..', 'adapters', id, 'greatping'),
+    join(here, '../../../../plugins', id, 'greatping'),
+  ].find((file) => existsSync(join(file, manifestFile(id))));
+}
+/** The adapter version this CLI installs, or null when the build lacks it. */
+export function bundledAdapterVersion(id: NativeHost): string | null {
+  const source = adapterSource(id);
+  if (!source) return null;
+  try {
+    const version = JSON.parse(readFileSync(join(source, manifestFile(id)), 'utf8')).version;
+    return typeof version === 'string' ? version : null;
+  } catch {
+    return null;
+  }
+}
 export function installNativeAdapter(id: NativeHost): void {
   checkHostVersion(id);
   const path = adapterPath(id);
@@ -213,14 +233,7 @@ export function installNativeAdapter(id: NativeHost): void {
   if (id === 'opencode' && assetExists(entryPath())) checkOwned('adapter-entry', entryPath());
   if (id === 'pi' && inspectNativeAdapter(id).status === 'unknown')
     throw new Error('Pi package filters are user-managed; use pi config to enable resources.');
-  const here = dirname(fileURLToPath(import.meta.url));
-  const source = [
-    join(here, 'adapters', id, 'greatping'),
-    join(here, '..', 'adapters', id, 'greatping'),
-    join(here, '../../../../plugins', id, 'greatping'),
-  ].find((file) =>
-    existsSync(join(file, id === 'cursor' ? '.cursor-plugin/plugin.json' : 'package.json')),
-  );
+  const source = adapterSource(id);
   if (!source) throw new Error('The bundled native adapter is missing from this CLI build.');
   mkdirSync(dirname(path), { recursive: true });
   cpSync(source, path, { recursive: true });

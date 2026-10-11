@@ -42,7 +42,11 @@ function secrets(config: Config): SecretKeys {
  */
 async function manifestFor(config: Config, fresh: boolean): Promise<Manifest> {
   if (!config.manifest)
-    throw new UsageError(null, 'This computer was paired before end-to-end encryption.', REPAIR);
+    throw new UsageError(
+      null,
+      'This computer was paired with an earlier version of GreatPing, so nothing was sent.',
+      REPAIR,
+    );
   if (fresh || claimStamp('manifest', HOOK_MANIFEST_INTERVAL_MS)) {
     const state = await followManifest(config);
     if (state.status === 'removed')

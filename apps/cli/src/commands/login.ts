@@ -6,18 +6,20 @@ import {
   type PairStartResponse,
 } from '@greatping/protocol';
 import {
+  type CeremonyInitiator,
   joinUserCode,
   type Manifest,
   newCodeHalf,
   startCeremony,
   toBase64Url,
 } from '@greatping/protocol/crypto';
-import { api } from '../api';
+import { ApiError, api } from '../api';
 import { type Config, isPaired, loadConfig, requireServer, saveConfig } from '../config';
 import { HOST_IDS, inspectHost } from '../integrations';
-import { newMachineKeys, randomBytes, verifyPairing } from '../keys';
+import { offerSkillUpdate } from '../integrations/skills-cli';
+import { confirmPendingCeremony, newMachineKeys, randomBytes } from '../keys';
 import { computerName, machinePlatform } from '../machine';
-import { withProgress } from '../progress';
+import { CommandInterrupted, withProgress } from '../progress';
 import { renderQr } from '../qr';
 import { currentDescription, reportMachineWithProgress } from '../report';
 import {
@@ -37,6 +39,12 @@ import { setup } from './setup';
 export async function login(options: { name?: string }): Promise<number> {
   const config = loadConfig();
   requireServer(config);
+  if (isPaired(config) && config.pendingCeremonyTag) {
+    if (!(await confirmPairing(config))) return 1;
+    ui.success('Confirmation sent. Your phone can now verify this computer.');
+    await reportMachineWithProgress(config);
+    return offerSetup();
+  }
   if (isPaired(config)) {
     ui.info('This computer is already paired with GreatPing.');
     ui.next(
@@ -45,18 +53,20 @@ export async function login(options: { name?: string }): Promise<number> {
     return 0;
   }
 
-  const name = options.name?.trim() || computerName();
+  const name = (options.name?.trim() || computerName()).trim();
+  const platform = machinePlatform();
   // The code's second half is this computer's secret: it is shown here and
   // typed or scanned on the phone, and never sent to the server. CPace on it
-  // lets the computer and the phone confirm each other's keys
-  // (docs/device-keys.md).
+  // proves to the phone that it is this computer, with these keys, before the
+  // phone signs anything (docs/pairing-v2.md).
   const keys = newMachineKeys();
   const secret = newCodeHalf(randomBytes);
-  const session = toBase64Url(randomBytes(16));
-  const state = startCeremony({
+  const initiator = startCeremony({
     kind: 'pair',
-    sessionId: session,
+    session: toBase64Url(randomBytes(16)),
     secret,
+    name,
+    platform,
     keys: keys.public,
     random: randomBytes,
   });
@@ -66,12 +76,13 @@ export async function login(options: { name?: string }): Promise<number> {
       api<PairStartResponse>(config, 'POST', '/pair/start', {
         token: null,
         body: {
-          machineName: name,
-          platform: machinePlatform(),
           ...currentDescription(),
+          machineName: name,
+          platform,
           keys: keys.public,
-          session,
-          share: state.share,
+          session: initiator.session,
+          share: initiator.share,
+          ceremony: 2,
         },
         signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
       }),
@@ -87,9 +98,23 @@ export async function login(options: { name?: string }): Promise<number> {
   print(`  Or enter this code in the app:  ${color.bold(color.cyan(code))}`);
   print();
 
-  const result = await waitForApproval(config, start);
+  const result = await waitForApproval(config, start, initiator);
   if (result === 'expired') {
     ui.error('The pairing code expired.', `Run ${command('greatping login')} to get a new one.`);
+    return 2;
+  }
+  if (result === 'mismatch') {
+    ui.error(
+      'The code did not match, so this computer was not paired.',
+      `Check the code and run ${command('greatping login')} again.`,
+    );
+    return 2;
+  }
+  if (result === 'cancelled') {
+    ui.error(
+      'Pairing was cancelled on your device.',
+      `Run ${command('greatping login')} to start again.`,
+    );
     return 2;
   }
 
@@ -100,40 +125,29 @@ export async function login(options: { name?: string }): Promise<number> {
   };
   let verified: { tag: string; manifest: Manifest };
   try {
-    verified = verifyPairing({
-      state,
-      ceremony: result.ceremony,
+    verified = initiator.finish({
+      approval: result.approval,
       manifests: result.manifests as Manifest[],
-      accountId: result.accountId,
-      machineId: result.machineId,
-      keys: keys.public,
+      now: Date.now(),
     });
   } catch {
-    // A mistyped code, or someone in between: never keep this pairing.
+    // An approval for something else than this computer: never keep it.
     await api(paired, 'DELETE', '/machine/me', { signal: AbortSignal.timeout(5000) }).catch(
       () => {},
     );
     ui.error(
-      'The code did not match, so this computer was not paired.',
-      `Check the code and run ${command('greatping login')} again.`,
+      'The approval could not be verified, so this computer was not paired.',
+      `Run ${command('greatping login')} again. If this repeats, contact support.`,
     );
     return 2;
   }
-  Object.assign(config, paired, { keys: keys.secret, manifest: verified.manifest });
+  Object.assign(config, paired, {
+    keys: keys.secret,
+    manifest: verified.manifest,
+    pendingCeremonyTag: verified.tag,
+  });
   saveConfig(config);
-  // The phone checks this tag to trust the computer's keys in turn.
-  await withProgress(
-    'Confirming pairing with GreatPing',
-    (signal) =>
-      api(config, 'POST', '/machine/me/ceremony', {
-        body: { tag: verified.tag },
-        signal: AbortSignal.any([signal, AbortSignal.timeout(5000)]),
-      }).catch(() => {}),
-    {
-      interrupted:
-        'Pairing confirmation interrupted. Pairing was saved locally; run greatping status.',
-    },
-  );
+  if (!(await confirmPairing(config))) return 1;
   const devices = result.deviceCount === 1 ? 'your device' : `your ${result.deviceCount} devices`;
   ui.success(`Paired ${strong(name)}. Alerts now reach ${devices}.`);
 
@@ -145,10 +159,55 @@ export async function login(options: { name?: string }): Promise<number> {
   return 0;
 }
 
-type Approval = Extract<PairPollResponse, { status: 'approved' }> | 'expired';
+/** A saved pairing survives lost M5 responses and interruption without reporting completion. */
+async function confirmPairing(config: Config): Promise<boolean> {
+  if (!config.pendingCeremonyTag) return true;
+  try {
+    await withProgress(
+      'Confirming pairing with GreatPing',
+      (signal) => confirmPendingCeremony(config, signal),
+      {
+        interrupted:
+          'Pairing confirmation interrupted. Pairing was saved locally; run greatping login to retry.',
+      },
+    );
+    return true;
+  } catch (error) {
+    if (error instanceof CommandInterrupted) throw error;
+    if (error instanceof ApiError && error.status === 401) {
+      ui.warn('This computer is no longer paired with GreatPing.');
+      ui.next(
+        `Run ${command('greatping logout')}, then ${command('greatping login')} to pair again.`,
+      );
+      return false;
+    }
+    ui.warn('Pairing is saved locally, but confirmation is pending.');
+    ui.next(`Run ${command('greatping login')} to retry the confirmation.`);
+    return false;
+  }
+}
 
-async function waitForApproval(config: Config, start: PairStartResponse): Promise<Approval> {
-  const label = () => `Waiting for approval ${muted(`· expires in ${countdown(start.expiresAt)}`)}`;
+type Approval =
+  | Extract<PairPollResponse, { status: 'approved' }>
+  | 'expired'
+  | 'mismatch'
+  | 'cancelled';
+
+/**
+ * Polls until a device approves. When a device answers, this computer proves
+ * it knows the code (M3) exactly once: a second, different answer ends the
+ * pairing rather than giving anyone another guess.
+ */
+async function waitForApproval(
+  config: Config,
+  start: PairStartResponse,
+  initiator: CeremonyInitiator,
+): Promise<Approval> {
+  let answered = false;
+  const label = () =>
+    answered
+      ? `Code entered on a device; waiting for approval ${muted(`· expires in ${countdown(start.expiresAt)}`)}`
+      : `Waiting for approval ${muted(`· expires in ${countdown(start.expiresAt)}`)}`;
   return withProgress(
     label(),
     async (signal, update): Promise<Approval> => {
@@ -161,19 +220,45 @@ async function waitForApproval(config: Config, start: PairStartResponse): Promis
             { signal },
           );
           if (Date.now() >= start.expiresAt) break;
+          const timeout = () =>
+            AbortSignal.any([
+              signal,
+              AbortSignal.timeout(Math.max(1, Math.min(8000, start.expiresAt - Date.now()))),
+            ]);
+          let poll: PairPollResponse;
           try {
-            const poll = await api<PairPollResponse>(config, 'GET', `/pair/${start.pairingId}`, {
+            poll = await api<PairPollResponse>(config, 'GET', `/pair/${start.pairingId}`, {
               token: start.pollSecret,
-              signal: AbortSignal.any([
-                signal,
-                AbortSignal.timeout(Math.max(1, Math.min(8000, start.expiresAt - Date.now()))),
-              ]),
+              signal: timeout(),
             });
-            if (poll.status === 'approved') return poll;
-            if (poll.status === 'expired') return 'expired';
           } catch {
             signal.throwIfAborted();
             // Transient network trouble: keep polling until the code expires.
+            continue;
+          }
+          if (poll.status === 'approved') return poll;
+          if (poll.status === 'expired') return 'expired';
+          if (poll.status === 'aborted')
+            return poll.reason === 'mismatch' ? 'mismatch' : 'cancelled';
+          if (poll.status !== 'responded') continue;
+          let tag: string;
+          try {
+            tag = initiator.answer(start.machineId, poll.response);
+          } catch {
+            return 'mismatch';
+          }
+          answered = true;
+          update(label());
+          if (poll.confirmed) continue;
+          try {
+            await api(config, 'POST', `/pair/${start.pairingId}/confirm`, {
+              token: start.pollSecret,
+              body: { tag },
+              signal: timeout(),
+            });
+          } catch {
+            signal.throwIfAborted();
+            // Sent again with the same tag on the next poll.
           }
         }
         return 'expired';
@@ -192,7 +277,7 @@ async function offerSetup(): Promise<number> {
       ? report.detected && report.hooks.status !== 'ok'
       : !['ready', 'disabled'].includes(report.plugin.status) || report.conflicts.length > 0,
   );
-  if (pending.length === 0) return 0;
+  if (pending.length === 0) return offerSkillUpdate();
   const names = pending.map((report) => report.host.name).join(' and ');
   // Never change another tool's settings without asking.
   if (!interactive) {

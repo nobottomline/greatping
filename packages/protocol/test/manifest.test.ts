@@ -11,6 +11,7 @@ import {
   REMOVAL_COOLING_OFF_MS,
   removeMember,
   rotateKeys,
+  signBytes,
   signManifest,
   toHex,
   verifyChain,
@@ -61,12 +62,23 @@ describe('manifest encoding', () => {
     expect(g.members[0]?.sign.key).toBe('3o8Unzm948mZcdxhQd2mr8Ghhd4Ur3xS9wL_Wqr1Gug');
     expect(g.members[0]?.enc.key).toBe('arcRgiJO46ju8aWQ3Eca3m2rhv3u8DiQfLoacn1CcE8');
     expect(toHex(canonicalManifest(g))).toBe(
-      '15477265617450696e67206d616e6966657374207631056163635f310131000767656e65736973096465765f70686f6e65096465765f70686f6e650d313739303030303030303030300131870106646576696365096465765f70686f6e6507656432353531392b336f38556e7a6d3934386d5a636478685164326d72384768686434557233785339774c5f57717231477567067832353531392b6172635267694a4f34366a753861575133456361336d32726876337538446951664c6f61636e31436345380d3137393030303030303030303000',
+      '15477265617450696e67206d616e6966657374207632056163635f310131000767656e65736973096465765f70686f6e65096465765f70686f6e650d313739303030303030303030300131870106646576696365096465765f70686f6e6507656432353531392b336f38556e7a6d3934386d5a636478685164326d72384768686434557233785339774c5f57717231477567067832353531392b6172635267694a4f34366a753861575133456361336d32726876337538446951664c6f61636e31436345380d3137393030303030303030303000',
     );
     expect(g.signature).toBe(
-      't84Qg1Tr5mWExZYaP13OfrwJAgyEaA46RARkevIzwCktM2pAoeQTHRVf4PQiyIubKTXZJ7t6rxMVs8tF1t_5Cw',
+      'BQwB32JBYCSwFq5HOT1DggROcW5C3IVODqyPJVP6CHsnnCZZDsoZZiRJHsep8UKGqStFthyKZwP79n_aCVpJDA',
     );
-    expect(manifestHash(g)).toBe('-QmH_TKkceZtnPGnKzfzdcGghXSEXcPazfKmVdqJxAU');
+    expect(manifestHash(g)).toBe('z3C_tPmNX_ZCBWIZceCx0m60KzFCmprHzhZk6bXGUfA');
+  });
+
+  it('rejects versions signed under the v1 encoding (pairing v2 start-over)', () => {
+    const g = genesis();
+    const bytes = canonicalManifest(g);
+    // The tag is the first field: its last byte is the version digit.
+    const v1 = Uint8Array.from(bytes);
+    expect(v1[21]).toBe(0x32);
+    v1[21] = 0x31;
+    const legacy = { ...g, signature: signBytes(phone.secret, v1) };
+    expect(failure(() => verifyGenesis(legacy, 'acc_1', NOW))).toBe('signature');
   });
 });
 
