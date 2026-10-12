@@ -629,11 +629,25 @@ export const ceremonyAbortBodySchema = z.strictObject({
 export type CeremonyAbortBody = z.infer<typeof ceremonyAbortBodySchema>;
 export type CeremonyAbortReason = CeremonyAbortBody['reason'];
 
-/** What the answering device reads while it waits for `Ta`. */
+/**
+ * What the answering device reads while it waits for `Ta`, and after its
+ * approval for the initiator's final tag `D` (`done`, once the initiator
+ * posted it).
+ */
 export type CeremonyProgressResponse =
   | { status: 'waiting' }
-  | { status: 'answered'; tag: string }
+  | { status: 'answered'; tag: string; done?: string }
   | { status: 'ended' };
+
+/**
+ * Ceremony polls (the initiator's `GET /pair/:id` and `GET /device-links/:id`,
+ * the answering device's `progress`) accept `?wait=<seconds>` up to this: the
+ * server answers as soon as the other side moved, or with the unchanged state
+ * when the wait ends. A client gives the request this long plus a margin. A
+ * server that predates it answers at once, so clients keep their interval
+ * between polls that came back unchanged quickly.
+ */
+export const CEREMONY_WAIT_MAX_SEC = 25;
 
 /** A new manifest version that changes no membership by itself (genesis, rotation, cleanup). */
 export const postManifestBodySchema = z.strictObject({ manifest: manifestSchema });

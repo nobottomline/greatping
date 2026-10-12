@@ -1,6 +1,6 @@
 {
   "name": "greatping",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Get an alert on your phone when your coding agent needs you",
   "keywords": [
     "cli",
@@ -11,7 +11,7 @@
     "notifications",
     "push"
   ],
-  "homepage": "https://github.com/nobottomline/greatping#readme",
+  "homepage": "https://greatping.com/",
   "bugs": {
     "url": "https://github.com/nobottomline/greatping/issues"
   },

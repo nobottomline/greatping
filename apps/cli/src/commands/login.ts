@@ -2,6 +2,7 @@ import process from 'node:process';
 import { setTimeout as delay } from 'node:timers/promises';
 import {
   buildPairDeepLink,
+  CEREMONY_WAIT_MAX_SEC,
   type PairPollResponse,
   type PairStartResponse,
 } from '@greatping/protocol';
@@ -212,24 +213,33 @@ async function waitForApproval(
     label(),
     async (signal, update): Promise<Approval> => {
       const ticker = setInterval(() => update(label()), 1000);
+      // The server holds each poll until a device moved (`?wait=`); one that
+      // came back sooner with nothing new (an older server, an error) waits
+      // out the interval before the next.
+      let nextPollAt = Date.now();
       try {
         while (Date.now() < start.expiresAt) {
-          await delay(
-            Math.min(start.pollIntervalSec * 1000, start.expiresAt - Date.now()),
-            undefined,
-            { signal },
-          );
+          const pause = Math.min(nextPollAt, start.expiresAt) - Date.now();
+          if (pause > 0) await delay(pause, undefined, { signal });
           if (Date.now() >= start.expiresAt) break;
-          const timeout = () =>
+          const waitSec = Math.min(
+            CEREMONY_WAIT_MAX_SEC,
+            Math.floor((start.expiresAt - Date.now()) / 1000),
+          );
+          nextPollAt = Date.now() + start.pollIntervalSec * 1000;
+          const timeout = (waitMs = 0) =>
             AbortSignal.any([
               signal,
-              AbortSignal.timeout(Math.max(1, Math.min(8000, start.expiresAt - Date.now()))),
+              AbortSignal.timeout(
+                Math.max(1, Math.min(8000 + waitMs, start.expiresAt - Date.now())),
+              ),
             ]);
           let poll: PairPollResponse;
           try {
-            poll = await api<PairPollResponse>(config, 'GET', `/pair/${start.pairingId}`, {
+            const query = waitSec > 0 ? `?wait=${waitSec}` : '';
+            poll = await api<PairPollResponse>(config, 'GET', `/pair/${start.pairingId}${query}`, {
               token: start.pollSecret,
-              signal: timeout(),
+              signal: timeout(waitSec * 1000),
             });
           } catch {
             signal.throwIfAborted();
@@ -256,6 +266,8 @@ async function waitForApproval(
               body: { tag },
               signal: timeout(),
             });
+            // Sent: the next poll waits for the approval.
+            nextPollAt = Date.now();
           } catch {
             signal.throwIfAborted();
             // Sent again with the same tag on the next poll.

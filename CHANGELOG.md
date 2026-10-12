@@ -5,6 +5,13 @@ Unreleased are not available merely by installing npm `latest`.
 
 ## Unreleased
 
+## 0.5.1 — 2026-10-13
+
+- Pairing reacts at once. `greatping login` waits on the service for the
+  phone (`?wait=`) instead of polling every two seconds, so the code check
+  and the approval reach the computer as soon as they happen. Against a
+  service without long polls it keeps polling at the advertised interval.
+
 ## 0.5.0 — 2026-10-11
 
 - **Breaking: pairing v2.** The phone checks the computer's proof of the code

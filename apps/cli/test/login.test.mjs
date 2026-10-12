@@ -28,6 +28,8 @@ async function run({
   tamper = {},
   backgroundRetry = false,
   localLogout = false,
+  pollIntervalSec = 0,
+  pendingPolls = 0,
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'greatping-login-'));
   const saved = { HOME: process.env.HOME, XDG: process.env.XDG_CONFIG_HOME };
@@ -58,10 +60,11 @@ async function run({
   let expectedDone;
   let signed = false;
   let doneAttempts = 0;
+  let pending = pendingPolls;
   globalThis.fetch = async (url, init = {}) => {
-    const path = String(url).replace(`${DEFAULT_API_URL}/v1`, '');
+    const [path, query = ''] = String(url).replace(`${DEFAULT_API_URL}/v1`, '').split('?');
     const body = init.body ? JSON.parse(init.body) : undefined;
-    calls.push({ method: init.method ?? 'GET', path, body });
+    calls.push({ method: init.method ?? 'GET', path, query, body, at: Date.now() });
     const json = (value, status = 200) => new Response(JSON.stringify(value), { status });
     if (path === '/pair/start') {
       start = body;
@@ -72,10 +75,15 @@ async function run({
           lookup: 'K7QM',
           machineId: 'mch_1',
           expiresAt: Date.now() + 60_000,
-          pollIntervalSec: 0,
+          pollIntervalSec,
         },
         201,
       );
+    }
+    // A server without long polls: nobody answered yet, said at once.
+    if (path === '/pair/pr_1' && state === 'pending' && pending > 0) {
+      pending--;
+      return json({ status: 'pending' });
     }
     if (path === '/pair/pr_1' && state === 'pending') {
       const code = printed.match(/K7QM-([2-9A-HJ-NP-Z]{4})/);
@@ -218,6 +226,23 @@ test('login proves the code first, then accepts only a verified approval and con
   // Its first report carries the verified manifest version.
   const report = calls.find((c) => c.path === '/machine/me' && c.method === 'PATCH');
   assert.equal(report?.body.manifestVersion, 2);
+  // Every poll waits on the server for the phone, within the protocol's limit.
+  const polls = calls.filter((c) => c.path === '/pair/pr_1');
+  assert.ok(polls.length >= 2);
+  for (const poll of polls) {
+    const wait = Number(new URLSearchParams(poll.query).get('wait'));
+    assert.ok(wait > 0 && wait <= 25, `poll waits on the server: ${poll.query}`);
+  }
+});
+
+test('an older server that answers at once is polled at its interval, not in a loop', async () => {
+  const { code, calls } = await run({ pollIntervalSec: 0.2, pendingPolls: 3 });
+  assert.equal(code, 0);
+  const polls = calls.filter((c) => c.path === '/pair/pr_1');
+  // Three unchanged answers, then the phone's answer, its approval and the claim.
+  assert.ok(polls.length >= 4 && polls.length <= 6, `polled ${polls.length} times`);
+  for (let i = 1; i <= 3; i++)
+    assert.ok(polls[i].at - polls[i - 1].at >= 180, `poll ${i} came after the interval`);
 });
 
 test('a mistyped code ends on the phone before anything is signed', async () => {
