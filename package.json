@@ -29,7 +29,7 @@
     "@biomejs/biome": "^2.5.15",
     "oxlint": "1.87.0",
     "oxlint-tsgolint": "7.0.2003",
-    "typescript": "~5.9.3",
+    "typescript": "~7.0.2",
     "knip": "6.39.0"
   },
   "packageManager": "pnpm@10.33.0"
