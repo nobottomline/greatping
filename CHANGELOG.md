@@ -5,6 +5,18 @@ Unreleased are not available merely by installing npm `latest`.
 
 ## Unreleased
 
+## 0.5.2 — 2026-10-14
+
+- The pairing QR code opens `https://greatping.com/p#…` instead of
+  `greatping://pair?code=…`. A phone camera opens the GreatPing app directly
+  (Universal Links, Android App Links), or, without the app, a page that
+  explains the next step and shows the code to type. The code is in the URL
+  fragment, which a browser never sends to a server, and the QR code is the
+  same size as before. App builds older than the one that accepts these links
+  reject the new QR in their own scanner; type the code shown under it.
+- `greatping login` stops with a clear error, before showing any code, if the
+  service returns a pairing code the app could not accept.
+
 ## 0.5.1 — 2026-10-13
 
 - Pairing reacts at once. `greatping login` waits on the service for the

@@ -33,7 +33,7 @@ The code has two halves, `ABCD-EFGH`. The first finds the pairing on the service
 
 - stdout carries only results: the `ask` answer, `--json` objects, `--version`. Messages, spinners and prompts go to stderr, so `answer=$(greatping ask …)` works.
 - Color is used sparingly and follows `NO_COLOR`, `FORCE_COLOR` and `--no-color`; it is off when stderr is not a terminal. Spinners and prompts appear only when stdin and stderr are terminals and `CI` is unset.
-- The terminal QR code is drawn with background colors, dark on white, so it scans on light and dark themes; without color it falls back to half blocks.
+- The QR code holds `https://greatping.com/p#ABCDEFGH`: the phone's camera opens the app, or without it a page with the code; the code is in the fragment, which a browser never sends, and the link is short enough for the same 25 × 25 QR as before. The terminal QR code is drawn with background colors, dark on white, so it scans on light and dark themes; without color it falls back to half blocks.
 - Exit codes: `0` success, `1` error (including "not paired" for `status`), `2` the question or pairing code ended without an answer (expired, cancelled or resolved), `3` an answer arrived that could not be verified (not signed by a device of the account, not for this question, or not one of its choices); the question is withdrawn and nothing is printed to stdout, `130`/`143` interrupted. On those signals `ask` withdraws the question from the phone.
 - `ask` waits on a WebSocket and checks the HTTP state after disconnects, so an answer that arrives before the connection is still observed.
 - `ask` clears its waiting line before printing the answer or final status. JSON has no spinner; narrow terminals shorten the waiting label instead of wrapping it.

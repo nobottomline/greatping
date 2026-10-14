@@ -11,6 +11,7 @@ import {
   joinUserCode,
   type Manifest,
   newCodeHalf,
+  splitUserCode,
   startCeremony,
   toBase64Url,
 } from '@greatping/protocol/crypto';
@@ -90,6 +91,15 @@ export async function login(options: { name?: string }): Promise<number> {
     { interrupted: 'Pairing-code request interrupted. Run greatping login to start again.' },
   );
   const code = joinUserCode(start.lookup, secret);
+  // The lookup comes from the service; a code the app could never accept ends
+  // here, before the user is asked to scan anything.
+  if (!splitUserCode(code)) {
+    ui.error(
+      'GreatPing returned a pairing code this computer cannot show.',
+      `Run ${command('greatping login')} again; if it keeps happening, update the CLI.`,
+    );
+    return 1;
+  }
 
   ui.heading('Pair this computer');
   print(`  Open ${strong('GreatPing')} on your phone or tablet and scan this code:`);

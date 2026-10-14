@@ -6,7 +6,8 @@
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
-    "./crypto": "./src/crypto/index.ts"
+    "./crypto": "./src/crypto/index.ts",
+    "./links": "./src/links.ts"
   },
   "scripts": {
     "test": "vitest run",

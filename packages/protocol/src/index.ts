@@ -21,6 +21,7 @@ export {
   type Envelope,
   type EnvelopePurpose,
 } from './crypto/envelope';
+export * from './links';
 
 export const PROTOCOL_VERSION = '0.1.0';
 
@@ -914,16 +915,6 @@ export type AnswerBody = z.infer<typeof answerSchema>;
 
 export function normalizeUserCode(raw: string): string {
   return raw.toUpperCase().replace(/[^A-Z0-9]/g, '');
-}
-
-export function buildPairDeepLink(userCode: string): string {
-  const params = new URLSearchParams({ code: userCode });
-  return `greatping://pair?${params.toString()}`;
-}
-
-export function buildLinkDeepLink(userCode: string): string {
-  const params = new URLSearchParams({ code: userCode });
-  return `greatping://link?${params.toString()}`;
 }
 
 export const HOST_NAMES: Record<AlertHost, string> = {

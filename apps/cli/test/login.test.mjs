@@ -30,6 +30,7 @@ async function run({
   localLogout = false,
   pollIntervalSec = 0,
   pendingPolls = 0,
+  lookup = 'K7QM',
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'greatping-login-'));
   const saved = { HOME: process.env.HOME, XDG: process.env.XDG_CONFIG_HOME };
@@ -72,7 +73,7 @@ async function run({
         {
           pairingId: 'pr_1',
           pollSecret: 'ps_secret',
-          lookup: 'K7QM',
+          lookup,
           machineId: 'mch_1',
           expiresAt: Date.now() + 60_000,
           pollIntervalSec,
@@ -243,6 +244,18 @@ test('an older server that answers at once is polled at its interval, not in a l
   assert.ok(polls.length >= 4 && polls.length <= 6, `polled ${polls.length} times`);
   for (let i = 1; i <= 3; i++)
     assert.ok(polls[i].at - polls[i - 1].at >= 180, `poll ${i} came after the interval`);
+});
+
+test('a lookup the app could never accept ends before a code is shown', async () => {
+  const { code, config, calls, printed } = await run({ lookup: 'K7Q1' });
+  assert.equal(code, 1);
+  assert.equal(config.machineToken, undefined);
+  assert.match(printed, /pairing code this computer cannot show/);
+  assert.doesNotMatch(printed, /Pair this computer/);
+  assert.deepEqual(
+    calls.map((call) => call.path),
+    ['/pair/start'],
+  );
 });
 
 test('a mistyped code ends on the phone before anything is signed', async () => {
