@@ -47,16 +47,16 @@
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
     "picocolors": "^1.1.1",
-    "smol-toml": "^1.9.0",
+    "smol-toml": "^1.9.1",
     "toqr": "0.1.1",
     "ws": "^8.22.0",
-    "zod": "^4.6.5"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@greatping/protocol": "workspace:*",
     "@types/node": "^22.13.11",
     "@types/ws": "^8.18.2",
-    "tsdown": "0.23.0",
+    "tsdown": "0.23.1",
     "typescript": "~5.9.3"
   }
 }
