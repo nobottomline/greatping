@@ -13,7 +13,7 @@ async function session(mode, run, paired = true) {
   const cfg = join(root, '.config', 'greatping');
   mkdirSync(cfg, { recursive: true });
   const config = join(cfg, 'config.json');
-  if (paired) writeFileSync(config, JSON.stringify(pairedConfig(DEFAULT_API_URL)));
+  if (paired) writeFileSync(config, JSON.stringify(pairedConfig(DEFAULT_API_URL), null, 2));
   const before = paired ? readFileSync(config, 'utf8') : null;
   const log = join(root, 'calls.jsonl');
   const child = spawn(
@@ -268,5 +268,33 @@ test('MCP failures have a structured error without leaking the credential', asyn
     assert.equal(result.structuredContent.status, 'error');
     assert.equal(result.structuredContent.code, 'unauthorized');
     assert.doesNotMatch(JSON.stringify(result), /PRIVATE TOKEN/);
+  });
+});
+
+test('MCP status preserves cancellation recovery and the next mutating tool reconciles it', async () => {
+  await session('answered', async ({ request, calls, root }) => {
+    const path = join(root, '.config', 'greatping', 'config.json');
+    const pending = { requestId: 'test-request', expiresAt: Date.now() + 60000 };
+    const saved = JSON.parse(readFileSync(path, 'utf8'));
+    writeFileSync(path, JSON.stringify({ ...saved, pendingQuestionCancellations: [pending] }));
+    await call(request, 'get_status');
+    assert.deepEqual(JSON.parse(readFileSync(path, 'utf8')).pendingQuestionCancellations, [
+      pending,
+    ]);
+    assert.equal(
+      calls().some((item) => item.path.endsWith('/cancel')),
+      false,
+    );
+    const result = await call(request, 'notify', {
+      message: 'Synthetic recovered MCP notification',
+    });
+    assert.equal(result.structuredContent.status, 'accepted');
+    assert.equal(JSON.parse(readFileSync(path, 'utf8')).pendingQuestionCancellations, undefined);
+    assert.deepEqual(
+      calls()
+        .filter((item) => item.path.endsWith('/cancel'))
+        .map((item) => item.path),
+      ['/v1/requests/test-request/cancel'],
+    );
   });
 });

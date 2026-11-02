@@ -27,7 +27,31 @@ From a checkout, use Node.js 24 LTS (24.11 or later), build with `pnpm -F greatp
 
 Every command has `--help`. `login` names the computer as the OS does (for example "Alex's MacBook Pro"; override with `--name`), prints a QR code and a manual code, and waits with a countdown. When Claude Code or Codex is installed but not alerting yet, an interactive `login` offers `setup`; non-interactive runs only print the hint and never change another tool's settings. The CLI saves its bearer credential under `~/.config/greatping/config.json` on macOS/Linux or `%APPDATA%\greatping\config.json` on Windows with user-only permissions.
 
-The code has two halves, `ABCD-EFGH`. The first finds the pairing on the service; the second never leaves this computer and the phone it is typed or scanned into. The CLI and the phone run CPace (a password-authenticated key exchange) on it: when a phone enters the code, the CLI proves it knows the code, once, and the phone checks that proof before it signs anything, so a service in between cannot swap keys; a mistyped code ends the pairing on both sides with "The code did not match" and nothing is added. `login` then accepts only an approval that verifies against the version adding this computer, and revokes itself otherwise. Its final confirmation to the phone is saved before it is sent: if it does not get through, `login` exits `1`, `status` shows it as pending, and the next `greatping login` or hourly report sends the same confirmation without a new code. The computer's Ed25519 and X25519 keys and the latest account manifest it verified (the signed list of the account's devices and computers) are kept in the same user-only config file. `status` shows them as Keys; a computer paired before keys or by CLI 0.4 or earlier shows `none` until it is paired again (pairing v2 changed the manifest encoding). Hourly reports follow the manifest, verify every new version and report the version in use, so devices notice a service that withholds changes. The protocol is in `packages/protocol/src/crypto`; `@noble/curves` and `@noble/hashes` are runtime dependencies because the bundled protocol imports them.
+The code has two halves, `ABCD-EFGH`. The first finds the pairing on the service; the second never leaves this computer and the phone it is typed or scanned into. The CLI and the phone run CPace (a password-authenticated key exchange) on it: when a phone enters the code, the CLI proves it knows the code, once, and the phone checks that proof before it signs anything, so a service in between cannot swap keys; a mistyped code ends the pairing on both sides with "The code did not match" and nothing is added. `login` then accepts only an approval that verifies against the version adding this computer, and revokes itself otherwise. Its final confirmation to the phone is saved before it is sent: if it does not get through, `login` exits `1`, `status` shows it as pending, and the next `greatping login` or hourly report sends the same confirmation without a new code. The computer's Ed25519 and X25519 keys and the latest account manifest it verified (the signed list of the account's devices and computers) are kept in the same user-only config file. `status` shows them as Keys; a computer paired before keys or by CLI 0.4 or earlier shows `none` until it is paired again (pairing v2 changed the manifest encoding). Hourly reports follow the manifest, verify every new version and report the version in use, so devices notice a service that withholds changes. Config writes use atomic replacement and a bounded cross-process ticket lock. Manifest refresh and final-confirmation acknowledgement re-read under that lock, verify the complete pairing identity, and preserve concurrent changes; manifest versions cannot move backwards. Logout and uninstall use the same boundary, so an older in-flight operation cannot restore or erase a replacement pairing. A dead writer is ignored by its unique ticket and a live writer is never forcibly displaced. The protocol is in `packages/protocol/src/crypto`; `@noble/curves` and `@noble/hashes` are runtime dependencies because the bundled protocol imports them.
+
+## Windows, PowerShell and WSL
+
+Use Node.js >=22.20 (Node 24 LTS is recommended). Install GreatPing in the same
+environment as your agent. In PowerShell, `npm.cmd install -g greatping` and
+`greatping.cmd login` also work when execution policy prevents npm's `.ps1`
+launchers; changing the policy is unnecessary. In WSL, install Linux Node and
+GreatPing inside the distribution and keep configuration in its Linux home,
+not on `/mnt/c`. Windows and WSL have separate installations and pairings.
+
+Windows private state uses an explicit current-user ACL before credential
+access, including migration of existing `config.json` and `alerts.json` files.
+ACL failures stop access. This requires built-in Windows PowerShell 5.1.
+Codex hook invocations transport literal arguments in an encoded launcher and
+start the child directly, so cmd metacharacters in paths cannot become commands.
+`run` supports npm-style `.cmd` shims; NUL is rejected, and batch arguments with
+line breaks are rejected rather than interpreted by a shell. Native executables
+remain direct children; POSIX argument and process-group behavior is unchanged.
+
+The archive CI includes Windows PowerShell 5.1/7 and Ubuntu 24.04 on WSL1/WSL2,
+on Node 22.20 and 24. It uses a simulated phone and agent lifecycle fixtures.
+Successful jobs do not establish real agent trust/activation, native Windows
+console Ctrl+C behavior, or physical phone delivery. Inspect the exact candidate's
+CI results before claiming those platform checks passed.
 
 ## Output contract
 
@@ -158,7 +182,7 @@ Alerts say who waits and why, never what about: the hook sends the agent, the re
 
 ### Long commands
 
-`greatping run -- <command> [args…]` runs a command in the current terminal (stdin, stdout and stderr stay attached) and sends one alert when it ends: "pnpm test succeeded · Finished in 4m 12s" or "pnpm test failed · Exit code 1 after 4m 12s". The alert names the program and a plain-word subcommand only; arguments never leave the computer, since they can hold tokens or paths. `--title` names it yourself, `--on-fail` alerts only on failure. It exits with the command's code (127 when it cannot start), so it works in scripts; an interrupted command (Ctrl+C, SIGTERM) alerts nobody. A failed alert, for example when the computer is not paired, is a warning and never changes the exit code. The command is run directly, not through a shell: use `greatping run -- sh -c "…"` for pipelines.
+`greatping run -- <command> [args…]` runs a command in the current terminal (stdin, stdout and stderr stay attached) and sends one alert when it ends: "pnpm test succeeded · Finished in 4m 12s" or "pnpm test failed · Exit code 1 after 4m 12s". The alert names the program and a plain-word subcommand only; arguments never leave the computer, since they can hold tokens or paths. `--title` names it yourself, `--on-fail` alerts only on failure. It exits with the command's code (127 when it cannot start), so it works in scripts; an interrupted command (Ctrl+C, SIGTERM) alerts nobody. Wrapper interruption suppresses completion even when a child handles the signal by exiting successfully. On POSIX, a command with non-TTY stdin owns an isolated process group, so cancellation also cleans up its descendants; a command with TTY stdin remains in the terminal group to preserve interactive input and job control. In that attached mode, terminal Ctrl+C delivers SIGINT directly to the child; the wrapper records interruption without relaying another SIGINT, preserving graceful handlers that treat a second interrupt as a forced exit. Node cannot distinguish a terminal signal from a PID-only signal: SIGINT addressed only to the TTY wrapper therefore stops its child through the five-second forced-shutdown fallback, rather than immediate graceful forwarding. TTY SIGTERM and non-TTY process-group signals are forwarded immediately. Cancellation allows five seconds for shutdown, then forces termination; a second interrupt forces termination immediately. Windows uses `taskkill /PID <owned-child> /T /F` for its child tree. A failed alert, for example when the computer is not paired, is a warning and never changes the exit code. Native executables run directly; Windows batch launchers use an escaped cmd adapter. Choose a shell explicitly for pipelines, for example `greatping run -- sh -c "…"` on POSIX or `greatping run -- cmd.exe /d /c "…"` on Windows.
 
 ### Test notifications
 
@@ -225,7 +249,7 @@ CLI and MCP `notify` report `Notification queued.` when alerts are active. The J
 `paused` means the request is listed in the app without a push. Questions distinguish
 `answered`, `expired`, `cancelled` and `resolved`. Cancelling a running question withdraws it
 when its ID is available; failed withdrawal is an error, never a claim of success.
-The WebSocket is closed and the polling loop stops on cancellation.
+The WebSocket is closed and the polling loop stops on cancellation. Native adapters keep the local MCP connection open until the CLI acknowledges that exact tool request after cleanup. This opt-in acknowledgement is separate from the cancelled MCP response, which the SDK suppresses. Withdrawal failures are reported as unconfirmed. Before attempting withdrawal, the CLI saves only that cancelled question's opaque ID and server-provided expiry in its existing private config. The next `notify`, `ask`, `pause`, or `resume` CLI/MCP operation retries one queued cancellation with a 1.5-second network limit; failures rotate to the back of the queue, while status remains read only. Live questions without a cancellation intent are never enumerated or withdrawn. A final server state, acknowledged cancellation, missing request, or its recorded expiry clears recovery; offline/provider failures retain it. Pairing guards prevent old recovery from modifying a replacement pairing. Logout or successful uninstall removes recovery with the credential. If saving recovery fails, HTTP withdrawal is still attempted and the local failure is reported. Outbox config-lock waits are limited to 500 ms each, so persistence, the 3-second initial withdrawal, and acknowledgement cleanup add at most four seconds once the ID is known; the native adapter's total cancellation bound remains 25 seconds. Older CLIs still receive standard MCP cancellation; a bounded fallback allows the known creation and withdrawal budgets, then reports unconfirmed cleanup instead of claiming that the question was withdrawn.
 
 `get_status` is read only: it does not refresh the machine report, modify files,
 send alerts, or expose the credential, account ID, machine name or device names.
@@ -295,7 +319,7 @@ failures are also reported rather than hidden.
 If the service is unavailable, retry later. To explicitly remove local data
 without server revocation, use `greatping uninstall --local-only`; its warning
 and JSON result identify the skipped revocation. Unpair the computer separately
-in the app. `--dry-run` never invokes a package manager or the API.
+in the app. Successful local cleanup includes `alerts.json`, which stores the opaque-ID secret, recent project paths, and local name/hide overrides. Failed integration cleanup or server revocation retains that state for recovery. `--dry-run` never invokes a package manager or the API.
 
 `greatping setup [claude|codex] --remove` removes integrations only, keeping
 pairing and the CLI. `greatping logout` unpairs without removing integrations.

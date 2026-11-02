@@ -13,11 +13,15 @@ if (args.length && !check && !output) {
   process.exit(1);
 }
 
-const VERSION = '0.2.0';
+const VERSION = '0.2.1';
 const repository = 'https://github.com/nobottomline/greatping';
 const author = { name: 'Great Love', url: 'https://greatping.com' };
 const skill = readFileSync(join(root, 'skills/greatping/SKILL.md'), 'utf8');
 const bridge = readFileSync(join(root, 'plugins/shared/bridge.mjs'), 'utf8');
+const windowsCommand = readFileSync(join(root, 'plugins/shared/windows-command.mjs'), 'utf8');
+// Codex provides PLUGIN_ROOT in the hook environment. Resolve it in Node,
+// rather than interpolating a filesystem path into cmd.exe or a POSIX shell.
+const codexHook = `node -e "Promise.resolve().then(()=>import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'scripts/bridge.mjs')).href)).then(m=>m.main(['codex','hook'])).then(c=>{process.exitCode=c}).catch(()=>{process.exitCode=0})"`;
 const license = readFileSync(join(root, 'LICENSE'), 'utf8');
 const catalogs = existsSync(join(root, 'oss/package.json')) ? join(root, 'oss') : root;
 const files = new Map();
@@ -72,8 +76,7 @@ for (const host of ['claude', 'codex']) {
           hooks: [
             {
               type: 'command',
-              command:
-                host === 'claude' ? 'node' : `node "${variable}/scripts/bridge.mjs" ${host} hook`,
+              command: host === 'claude' ? 'node' : codexHook,
               ...(host === 'claude'
                 ? { args: [`${variable}/scripts/bridge.mjs`, host, 'hook'] }
                 : {}),
@@ -146,12 +149,20 @@ for (const host of ['opencode', 'pi']) {
     `${directory}/package.json`,
     json({
       name: `@greatping/${host}`,
-      version: '0.1.1',
+      version: '0.1.2',
       type: 'module',
       license: 'MIT',
       description: `GreatPing native ${host} adapter, phone alerts, tools and skill.`,
       repository,
-      files: ['index.js', 'bridge.mjs', 'native.mjs', 'skills', 'LICENSE', 'README.md'],
+      files: [
+        'index.js',
+        'bridge.mjs',
+        'windows-command.mjs',
+        'native.mjs',
+        'skills',
+        'LICENSE',
+        'README.md',
+      ],
       engines: { node: '>=22.20.0' },
       ...(host === 'pi'
         ? {
@@ -293,6 +304,10 @@ files.set(
 );
 
 let failed = false;
+for (const file of [...files.keys()]) {
+  if (file.endsWith('/bridge.mjs'))
+    files.set(file.replace(/bridge\.mjs$/, 'windows-command.mjs'), windowsCommand);
+}
 for (const [file, content] of files) {
   // Public root catalogs are overlaid by the existing OSS exporter.
   const target = output ? join(output, file) : join(file.startsWith('.') ? catalogs : root, file);

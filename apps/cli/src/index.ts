@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { PROTOCOL_VERSION } from '@greatping/protocol';
 import { ApiError } from './api';
 import { ask, notify } from './commands/ask';
-import { doctor } from './commands/doctor';
+import { doctor, doctorReport } from './commands/doctor';
 import { hooks } from './commands/hooks';
 import { login, logout } from './commands/login';
 import { pause, resume } from './commands/pause';
@@ -229,15 +229,21 @@ const commands: Record<string, Command> = {
     run: () => resume(),
   },
   doctor: {
-    usage: 'greatping doctor [--fix] [--verbose]',
+    usage: 'greatping doctor [--fix] [--verbose] [--report]',
     summary: 'Check pairing, alerts and agent integrations',
     details: ['Runs each installed hook once with a test event that sends nothing.'],
-    options: { fix: { type: 'boolean' }, verbose: { type: 'boolean' } },
+    options: {
+      fix: { type: 'boolean' },
+      verbose: { type: 'boolean' },
+      report: { type: 'boolean' },
+    },
     flags: [
       ['--fix', 'Repair hooks and tools that cannot run or are outdated'],
       ['--verbose', 'Include the service address for troubleshooting'],
+      ['--report', 'Print a support report without names, paths or content'],
     ],
-    run: (v) => doctor({ fix: Boolean(v.fix), verbose: Boolean(v.verbose) }),
+    run: (v) =>
+      v.report ? doctorReport() : doctor({ fix: Boolean(v.fix), verbose: Boolean(v.verbose) }),
   },
   hooks: {
     usage: 'greatping hooks <install|uninstall|status> [claude|codex] [--finished|--no-finished]',
@@ -411,8 +417,10 @@ async function main(argv: string[]): Promise<number> {
   const separatorIndex = argv.indexOf('--');
   const [name, ...rest] = argv.filter(
     (arg, index) =>
-      arg !== '--no-color' &&
-      (arg !== '--no-update-check' || (separatorIndex !== -1 && index > separatorIndex)),
+      !(
+        (arg === '--no-color' || arg === '--no-update-check') &&
+        (separatorIndex === -1 || index < separatorIndex)
+      ),
   );
   if (!name || name === '-h' || name === '--help' || name === 'help') {
     const topic = name === 'help' ? rest[0] : undefined;

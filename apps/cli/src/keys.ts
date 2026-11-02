@@ -3,11 +3,12 @@ import {
   generateKeys,
   type Manifest,
   type MemberKeys,
+  manifestHash,
   toBase64Url,
   verifyNext,
 } from '@greatping/protocol/crypto';
 import { api } from './api';
-import { type Config, isPaired, loadConfig, saveConfig } from './config';
+import { type Config, isPaired, updateConfig } from './config';
 
 /**
  * This computer's keys and its view of the account manifest
@@ -49,7 +50,7 @@ export async function followManifest(config: Config, signal?: AbortSignal): Prom
     });
     newer = res.manifests as Manifest[];
   } catch {
-    return stateOf(config.machineId, pinned);
+    newer = [];
   }
   let latest = pinned;
   for (const version of newer) {
@@ -64,8 +65,18 @@ export async function followManifest(config: Config, signal?: AbortSignal): Prom
     }
     latest = version;
   }
-  if (latest !== pinned) saveConfig({ ...config, manifest: latest });
-  return stateOf(config.machineId, latest);
+  const saved = updateConfig(config, (current) => {
+    const currentManifest = current.manifest;
+    if (!currentManifest) throw new Error('Local pairing has no verified account history.');
+    if (currentManifest.version >= latest.version) return undefined;
+    const shared = [pinned, ...newer].find(
+      (manifest) => manifest.version === currentManifest.version,
+    );
+    if (!shared || manifestHash(shared) !== manifestHash(currentManifest))
+      throw new Error('Concurrent account history does not match the verified chain.');
+    return { ...current, manifest: latest };
+  });
+  return stateOf(config.machineId, saved.manifest as Manifest);
 }
 
 function stateOf(machineId: string, manifest: Manifest): ManifestState {
@@ -85,13 +96,12 @@ export async function confirmPendingCeremony(config: Config, signal?: AbortSigna
       : AbortSignal.timeout(5000),
   });
   signal?.throwIfAborted();
-  const { pendingCeremonyTag, ...saved } = loadConfig();
-  if (
-    saved.machineId !== config.machineId ||
-    saved.machineToken !== config.machineToken ||
-    pendingCeremonyTag !== tag
-  )
-    throw new Error('Local pairing changed while confirming. Run greatping login again.');
-  saveConfig(saved);
+  updateConfig(config, (current) => {
+    if (!current.pendingCeremonyTag) return undefined;
+    if (current.pendingCeremonyTag !== tag)
+      throw new Error('Local pairing changed while confirming. Run greatping login again.');
+    const { pendingCeremonyTag: _tag, ...saved } = current;
+    return saved;
+  });
   delete config.pendingCeremonyTag;
 }

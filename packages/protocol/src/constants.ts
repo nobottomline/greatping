@@ -25,6 +25,8 @@ export const LIMITS = {
   eventRetentionDays: 90,
   /** A finished request keeps its text and answer this long, then only its outcome remains. */
   historyRetentionDays: 7,
+  /** The same with GreatPing Pro and the account's longer history turned on. */
+  historyRetentionProDays: 30,
   /** While the user is at the computer, an attention alert waits this long before it is sent. */
   presenceDelayDefaultSec: 30,
   presenceDelayMaxSec: 600,
@@ -58,3 +60,14 @@ export type AlertHost = (typeof ALERT_HOSTS)[number];
  */
 export const ATTENTION_REASONS = ['permission', 'question', 'input', 'finished', 'error'] as const;
 export type AttentionReason = (typeof ATTENTION_REASONS)[number];
+
+/**
+ * Computer timings a free account may choose (docs/monetization.md). Any value
+ * within the protocol's limits needs GreatPing Pro; without it, a stored value
+ * that is not one of these applies as the non-zero preset.
+ */
+export const FREE_TIMINGS = {
+  escalationWaitSec: [0, LIMITS.escalationWaitDefaultSec],
+  reminderAfterSec: [null, LIMITS.reminderDefaultSec],
+  presenceDelaySec: [0, LIMITS.presenceDelayDefaultSec],
+} as const;

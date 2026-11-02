@@ -88,21 +88,40 @@ export async function mcp(host, method, params, { signal, cwd } = {}) {
   let next = 0;
   const waiting = new Map();
   let failure;
-  const fail = () => {
-    failure = new Error('GreatPing local runtime closed or was cancelled.');
+  let cancellationTimer;
+  let cancellationBudget = 25000;
+  let cancelled = false;
+  const cancelledIds = new Set();
+  const cancellationError = (confirmed = false) =>
+    new Error(
+      confirmed
+        ? 'GreatPing local runtime request was cancelled.'
+        : 'GreatPing local runtime request was cancelled, but question withdrawal could not be confirmed. Check GreatPing.',
+    );
+  const fail = (error = new Error('GreatPing local runtime closed.')) => {
+    failure = cancelled ? cancellationError() : error;
     for (const item of waiting.values()) item.reject(failure);
     waiting.clear();
   };
-  child.on('error', fail);
-  child.on('close', fail);
-  child.stdin.on('error', fail);
+  child.on('error', () => fail());
+  child.on('close', () => fail());
+  child.stdin.on('error', () => fail());
   const stop = () => {
     child.kill('SIGKILL');
     fail();
   };
   const abort = () => {
-    // Give the CLI a chance to cancel a phone question before disconnecting.
-    for (const requestId of waiting.keys())
+    if (cancelled) return;
+    cancelled = true;
+    clearTimeout(deadline);
+    for (const [requestId, item] of waiting) {
+      // Initialization cannot have created a phone question.
+      if (item.method !== 'tools/call' || params?.name !== 'ask_user') {
+        item.reject(cancellationError(true));
+        waiting.delete(requestId);
+        continue;
+      }
+      cancelledIds.add(requestId);
       child.stdin.write(
         `${JSON.stringify({
           jsonrpc: '2.0',
@@ -110,22 +129,44 @@ export async function mcp(host, method, params, { signal, cwd } = {}) {
           params: { requestId },
         })}\n`,
       );
-    fail();
+    }
+    // The new runtime acknowledges actual cleanup. Older runtimes receive the
+    // standard cancellation too; the fallback bounds recovery and reports that
+    // withdrawal is unconfirmed. 25s covers creation (8s), queued project sync
+    // (6s), config contention (5s), withdrawal (3s), bounded recovery writes
+    // (1s total), and runtime scheduling.
+    cancellationTimer = setTimeout(stop, cancellationBudget);
   };
-  signal?.addEventListener('abort', abort, { once: true });
   const deadline = setTimeout(
-    stop,
+    abort,
     method === 'tools/call' && params?.name === 'ask_user'
       ? ((params.arguments?.timeoutSeconds ?? 1800) + 15) * 1000
       : 10000,
   );
+  signal?.addEventListener('abort', abort, { once: true });
   lines.on('line', (line) => {
     try {
       const response = JSON.parse(line);
+      if (response.method === 'notifications/greatping/cancellation') {
+        const requestId = response.params?.requestId;
+        if (!cancelledIds.has(requestId)) return;
+        const item = waiting.get(requestId);
+        waiting.delete(requestId);
+        item?.reject(cancellationError(response.params.confirmed === true));
+        return;
+      }
       const item = waiting.get(response.id);
       if (!item) return;
       waiting.delete(response.id);
-      if (response.error) item.reject(new Error('GreatPing rejected the local tool request.'));
+      if (cancelled)
+        item.reject(
+          cancellationError(
+            ['cancelled', 'answered', 'expired', 'resolved'].includes(
+              response.result?.structuredContent?.status,
+            ),
+          ),
+        );
+      else if (response.error) item.reject(new Error('GreatPing rejected the local tool request.'));
       else item.resolve(response.result);
     } catch {
       fail();
@@ -133,28 +174,41 @@ export async function mcp(host, method, params, { signal, cwd } = {}) {
   });
   const request = (name, value) =>
     new Promise((resolve, reject) => {
-      if (failure) {
-        reject(failure);
+      if (failure || cancelled) {
+        reject(failure ?? cancellationError(true));
         return;
       }
       const id = ++next;
-      waiting.set(id, { resolve, reject });
+      waiting.set(id, { resolve, reject, method: name });
       child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method: name, params: value })}\n`);
     });
   try {
-    await request('initialize', {
+    const initialized = await request('initialize', {
       protocolVersion: '2025-11-25',
       capabilities: {},
       clientInfo: { name: host, version: '0.1.0' },
     });
+    const advertised = initialized?.capabilities?.experimental?.['greatping/cancellation'];
+    if (
+      advertised?.version === 1 &&
+      Number.isInteger(advertised.timeoutMs) &&
+      advertised.timeoutMs > 0 &&
+      advertised.timeoutMs <= cancellationBudget
+    )
+      cancellationBudget = advertised.timeoutMs;
+    signal?.throwIfAborted();
     child.stdin.write(
       `${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`,
     );
-    return await request(method, params);
+    const value =
+      method === 'tools/call' && params?.name === 'ask_user'
+        ? { ...params, _meta: { ...params._meta, 'greatping/cancellation': 1 } }
+        : params;
+    return await request(method, value);
   } finally {
     clearTimeout(deadline);
+    clearTimeout(cancellationTimer);
     signal?.removeEventListener('abort', abort);
-    if (signal?.aborted) await new Promise((done) => setTimeout(done, 1000));
     lines.close();
     child.kill('SIGKILL');
   }

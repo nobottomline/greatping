@@ -1,6 +1,6 @@
 {
   "name": "greatping",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Phone alerts when Cursor IDE finishes successfully, with GreatPing MCP tools and skill.",
   "author": {
     "name": "Great Love"

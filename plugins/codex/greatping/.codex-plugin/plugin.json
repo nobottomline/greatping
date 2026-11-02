@@ -1,6 +1,6 @@
 {
   "name": "greatping",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Phone alerts when Codex finishes a turn, with explicit GreatPing MCP tools.",
   "author": {
     "name": "Great Love",

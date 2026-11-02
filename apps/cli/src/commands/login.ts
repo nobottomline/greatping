@@ -16,7 +16,14 @@ import {
   toBase64Url,
 } from '@greatping/protocol/crypto';
 import { ApiError, api } from '../api';
-import { type Config, isPaired, loadConfig, requireServer, saveConfig } from '../config';
+import {
+  type Config,
+  isPaired,
+  loadConfig,
+  requireServer,
+  saveConfig,
+  updateConfig,
+} from '../config';
 import { HOST_IDS, inspectHost } from '../integrations';
 import { offerSkillUpdate } from '../integrations/skills-cli';
 import { confirmPendingCeremony, newMachineKeys, randomBytes } from '../keys';
@@ -335,7 +342,7 @@ export async function logout(options: { yes?: boolean }): Promise<number> {
       }
       // Cancellation keeps the local credential for a safe retry.
       signal.throwIfAborted();
-      saveConfig({ apiUrl: config.apiUrl });
+      updateConfig(config, () => ({ apiUrl: config.apiUrl }));
     },
     {
       interrupted:

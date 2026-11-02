@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { ApiError, api } from '../api';
-import { configDir, configPath, isPaired, loadConfig } from '../config';
+import { configDir, configPath, isPaired, loadConfig, removeConfig } from '../config';
 import { detectInstallation, managerOutput, verifyRemoval } from '../installation';
 import { HOST_IDS } from '../integrations';
 import { ownershipPath } from '../integrations/ownership';
@@ -76,6 +76,7 @@ export async function uninstall(options: UninstallOptions): Promise<number> {
   const dir = configDir();
   const local: RemovalAction[] = [
     'config.json',
+    'alerts.json',
     'setup-options.json',
     'update-check.json',
     'hook-state',
@@ -86,7 +87,8 @@ export async function uninstall(options: UninstallOptions): Promise<number> {
       id: `local:${name}`,
       label: `Remove GreatPing local ${name}`,
       run: () => {
-        rmSync(join(dir, name), { recursive: name === 'hook-state', force: true });
+        if (name === 'config.json') removeConfig(config);
+        else rmSync(join(dir, name), { recursive: name === 'hook-state', force: true });
       },
     }));
   // Keep the journal until every earlier removal has succeeded.

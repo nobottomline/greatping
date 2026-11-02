@@ -165,6 +165,11 @@ export interface Machine {
   ceremonyTag: string | null;
   /** The manifest version the computer last reported using; null if it has not. */
   manifestVersion: number | null;
+  /**
+   * A demo computer hosted by the service (docs/demo-computer.md). It takes no
+   * place of the plan's computer limit. Absent from servers before it.
+   */
+  demo?: boolean;
 }
 
 /**
@@ -267,9 +272,12 @@ export interface PingRequest {
   /** When the request stopped waiting; absent while it is pending. */
   finishedAt?: number;
   /**
-   * The envelopes were deleted `historyRetentionDays` after the request
-   * finished; only its outcome and times remain.
+   * Days its text and answer are kept after it finishes, fixed when it was
+   * created (`historyRetentionDays`, or `historyRetentionProDays` with Pro and
+   * the account's longer history on). A plan that ends never shortens it.
    */
+  retentionDays: number;
+  /** The envelopes were deleted `retentionDays` after it finished; only its outcome and times remain. */
   contentErased?: boolean;
 }
 
@@ -413,6 +421,42 @@ export interface MeResponse {
   keysOutdated: boolean;
   /** Absent on older servers. No credential is ever used as an analytics identity. */
   analytics?: AccountAnalytics;
+  /** The account's plan; the server enforces it. */
+  plan: AccountPlan;
+}
+
+/** The account's plan (docs/monetization.md). Server data; the server enforces it. */
+export interface AccountPlan {
+  tier: 'free' | 'pro';
+  /** 'store': a subscription or purchase; 'grant': given by GreatPing. Null while free. */
+  source: 'store' | 'grant' | null;
+  /** When Pro ends; null while free or when it does not end. */
+  expiresAt: number | null;
+  /** Computers the account may have; null when it has no limit. */
+  computerLimit: number | null;
+  /** Whether this service sells Pro at all; when false, the app offers no purchase. */
+  purchasable: boolean;
+  /** Whether computer timings may take any value; otherwise only `FREE_TIMINGS` apply. */
+  customTimings: boolean;
+  /** Whether the account may keep history for `historyRetentionProDays`. */
+  longHistory: boolean;
+  /** Days new alerts keep their text: the account's choice where `longHistory` allows it. */
+  historyDays: number;
+}
+
+/** `PATCH /v1/account/history`: how long new alerts keep their text and answers. */
+export const historyPreferenceSchema = z
+  .object({ days: z.union([z.literal(7), z.literal(30)]) })
+  .strict();
+export type HistoryPreference = z.infer<typeof historyPreferenceSchema>;
+
+/** `POST /v1/billing/sync`: the account's store identity and its plan after a check. */
+export interface BillingSyncResponse {
+  /** The account's pseudonym at the store broker, never the account id. */
+  billingId: string;
+  plan: AccountPlan;
+  /** False when the broker could not be asked; the server keeps trying and the plan may still change. */
+  checked: boolean;
 }
 
 export interface AccountAnalytics {
@@ -675,6 +719,15 @@ export const pairStartBodySchema = z.object({
 });
 export type PairStartBody = z.infer<typeof pairStartBodySchema>;
 
+/** A code for the hosted demo computer (docs/demo-computer.md). */
+export interface DemoPairResponse {
+  /** The full code to enter or scan, as `greatping login` would show it. */
+  code: string;
+  /** The code as a site link, for a QR code. */
+  link: string;
+  expiresAt: number;
+}
+
 export interface PairStartResponse {
   pairingId: string;
   pollSecret: string;
@@ -728,6 +781,8 @@ export interface PairPreviewResponse {
   /** CPace session id and share, as the computer sent them. */
   session: string;
   share: string;
+  /** A computer hosted by GreatPing for trying the app (docs/demo-computer.md). */
+  demo?: boolean;
 }
 
 // Device linking: a new phone shows a code, a trusted phone scans and approves it.
@@ -1020,4 +1075,102 @@ const CATEGORY_IDS: Record<CategoryHint, string> = {
 export function pickNotificationCategory(req: Pick<PingRequest, 'kind' | 'hint'>): string {
   if (req.kind !== 'ask') return 'NOTIFY';
   return CATEGORY_IDS[req.hint ?? 'text'];
+}
+
+/**
+ * Support diagnostics: what the service knows about delivery,
+ * built for the user to read and send themselves. Members are named
+ * by references valid only inside one report (`D1`, `C1`, `R1`), never
+ * by ids or names; no content, keys, tokens, project or thread keys,
+ * locations or time zones appear in it.
+ */
+export interface DiagnosticsDevice {
+  ref: string;
+  /** The device that asked for the report. */
+  self: boolean;
+  platform: DevicePlatform;
+  type: DeviceType;
+  osVersion: string | null;
+  appVersion: string | null;
+  notifications: Device['notifications'];
+  pushToken: boolean;
+  alertCategories: AlertCategory[];
+  breakThroughFocus: boolean;
+  paused: boolean;
+  /** `now` when its quiet hours apply at the time of the report. */
+  quietHours: 'off' | 'on' | 'now';
+  quietAllowDecisions: boolean;
+  lastSeenAt: number | null;
+  /** The latest push GreatPing sent it: 'accepted' or the push service's code. */
+  lastPush: { at: number; result: string } | null;
+  /** The latest delivery receipt: 'delivered' (Apple or Google took it) or a code. */
+  lastReceipt: { at: number; result: string } | null;
+}
+
+export interface DiagnosticsTimings {
+  escalationWaitSec: number;
+  reminderAfterSec: number | null;
+  presenceDelaySec: number;
+}
+
+export interface DiagnosticsComputer {
+  ref: string;
+  /** The computer that asked for the report (`greatping doctor --report`). */
+  self: boolean;
+  platform: MachinePlatform;
+  osVersion: string | null;
+  arch: string | null;
+  cliVersion: string | null;
+  hosts: Array<Pick<HostIntegration, 'id' | 'hooks' | 'finished' | 'mcp' | 'skill' | 'lastHookAt'>>;
+  lastSeenAt: number | null;
+  lastAlertAt: number | null;
+  paused: boolean;
+  /** As set, and as new alerts use them (they differ when Pro ended). */
+  timings: { stored: DiagnosticsTimings; effective: DiagnosticsTimings };
+  projectLabels: ProjectLabels;
+  /** Each device's mode for this computer, by device reference. */
+  routes: Record<string, RouteMode>;
+}
+
+export interface DiagnosticsRequest {
+  ref: string;
+  computer: string;
+  kind: RequestKind;
+  host: AlertHost;
+  reason: AttentionReason | null;
+  status: RequestStatus;
+  stage: EscalationStage;
+  paused: boolean;
+  createdAt: number;
+  /** Opened on a device; not proof that a notification was shown. */
+  ackedAt: number | null;
+  answeredAt: number | null;
+  finishedAt: number | null;
+}
+
+export interface DiagnosticsPushTest {
+  at: number;
+  results: Array<{
+    device: string;
+    status: PushTestStatus;
+    reason: PushTestDevice['reason'] | null;
+  }>;
+}
+
+export interface DiagnosticsReport {
+  schemaVersion: 1;
+  scope: 'account' | 'computer';
+  generatedAt: number;
+  plan: Pick<AccountPlan, 'tier' | 'computerLimit' | 'customTimings' | 'historyDays'>;
+  devices: DiagnosticsDevice[];
+  computers: DiagnosticsComputer[];
+  /** The latest requests, newest first. */
+  requests: DiagnosticsRequest[];
+  /**
+   * Test notifications of the last day, newest first, as recorded when each
+   * ran: a delivery receipt that arrived later does not change them.
+   */
+  pushTests: DiagnosticsPushTest[];
+  /** Some members or requests were left out to keep the report short. */
+  truncated: boolean;
 }

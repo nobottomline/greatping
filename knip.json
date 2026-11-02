@@ -7,7 +7,8 @@
         "scripts/**/*.mjs",
         "plugins/**/{bridge,native}.mjs",
         "plugins/*/greatping/index.js",
-        "plugins/shared/{opencode,pi}.js"
+        "plugins/shared/{opencode,pi}.js",
+        "plugins/shared/windows-command.d.mts"
       ],
       "ignoreDependencies": ["@earendil-works/pi-ai"]
     },

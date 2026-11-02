@@ -1,0 +1,75 @@
+name: Windows and WSL CLI qualification
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        type: string
+        required: true
+      source:
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows, PowerShell 5.1 and 7 (Node ${{ matrix.node }})
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.20.0', '24']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ runner.temp }}/cli-candidate
+      - name: Install archive and exercise both PowerShell versions
+        shell: pwsh
+        run: ./apps/cli/test/windows-smoke.ps1 -Candidate "$env:RUNNER_TEMP/cli-candidate"
+
+  wsl:
+    name: WSL ${{ matrix.wsl }}, Ubuntu 24.04 (Node ${{ matrix.node }})
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        wsl: [1, 2]
+        node: ['22.20.0', '24']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source || github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: .cli-candidate
+      - uses: Vampire/setup-wsl@4c48163d9f981914dd8caa0fc335fe19cca5bff4 # v7.2.0
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: ${{ matrix.wsl }}
+          additional-packages: ca-certificates curl xz-utils python3
+          wsl-conf: |
+            [interop]
+            appendWindowsPath=false
+      - name: Create an ordinary Linux user
+        shell: wsl-bash -u root {0}
+        run: useradd --create-home --shell /bin/bash greatpingqa
+      - name: Qualify the same archive inside WSL
+        shell: wsl-bash -u greatpingqa {0}
+        run: |
+          cp -a . "$HOME/greatping-source"
+          cd "$HOME/greatping-source"
+          bash apps/cli/test/wsl-smoke.sh .cli-candidate '${{ matrix.node }}' '${{ matrix.wsl }}'

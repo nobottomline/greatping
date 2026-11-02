@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/scripts/bridge.mjs\" codex hook",
+            "command": "node -e \"Promise.resolve().then(()=>import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'scripts/bridge.mjs')).href)).then(m=>m.main(['codex','hook'])).then(c=>{process.exitCode=c}).catch(()=>{process.exitCode=0})\"",
             "timeout": 10
           }
         ]
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/scripts/bridge.mjs\" codex hook",
+            "command": "node -e \"Promise.resolve().then(()=>import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'scripts/bridge.mjs')).href)).then(m=>m.main(['codex','hook'])).then(c=>{process.exitCode=c}).catch(()=>{process.exitCode=0})\"",
             "async": true,
             "timeout": 10
           }
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/scripts/bridge.mjs\" codex hook",
+            "command": "node -e \"Promise.resolve().then(()=>import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'scripts/bridge.mjs')).href)).then(m=>m.main(['codex','hook'])).then(c=>{process.exitCode=c}).catch(()=>{process.exitCode=0})\"",
             "async": true,
             "timeout": 10
           }
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${PLUGIN_ROOT}/scripts/bridge.mjs\" codex hook",
+            "command": "node -e \"Promise.resolve().then(()=>import(require('node:url').pathToFileURL(require('node:path').join(process.env.PLUGIN_ROOT,'scripts/bridge.mjs')).href)).then(m=>m.main(['codex','hook'])).then(c=>{process.exitCode=c}).catch(()=>{process.exitCode=0})\"",
             "timeout": 10
           }
         ]

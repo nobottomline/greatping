@@ -16,6 +16,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { windowsShellCommand } from '../plugins/shared/windows-command.mjs';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const source = join(repo, 'plugins/shared/bridge.mjs');
@@ -125,6 +126,7 @@ test('generated packages contain their canonical skill and launcher and valid co
     for (const [generatedFile, canonical] of [
       ['index.js', `plugins/shared/${host}.js`],
       ['bridge.mjs', 'plugins/shared/bridge.mjs'],
+      ['windows-command.mjs', 'plugins/shared/windows-command.mjs'],
       ['native.mjs', 'plugins/shared/native.mjs'],
       ['skills/greatping/SKILL.md', 'skills/greatping/SKILL.md'],
     ])
@@ -157,6 +159,10 @@ test('configuration preserves pairing, defaults and completion opt-in across pac
   const copied = join(f.root, 'new cache with spaces/bridge.mjs');
   mkdirSync(dirname(copied), { recursive: true });
   cpSync(source, copied);
+  cpSync(
+    join(repo, 'plugins/shared/windows-command.mjs'),
+    join(dirname(copied), 'windows-command.mjs'),
+  );
   const result = spawnSync(process.execPath, [copied, 'claude', 'check'], {
     env: f.env,
     encoding: 'utf8',
@@ -193,8 +199,9 @@ test('saved stable launcher survives a sparse PATH and forwards stdin and prefer
   assert.equal(f.calls()[1].input, payload);
 });
 
-test('legacy exec and quoted shell handlers suppress plugin hooks and retain selected options', (t) => {
-  for (const host of ['claude', 'codex']) {
+test('legacy exec, quoted and encoded Windows handlers suppress duplicate plugin hooks', (t) => {
+  for (const format of ['claude', 'codex', 'windows']) {
+    const host = format === 'windows' ? 'codex' : format;
     const f = fixture(t);
     const path =
       host === 'claude' ? join(f.home, '.claude/settings.json') : join(f.codex, 'hooks.json');
@@ -204,7 +211,12 @@ test('legacy exec and quoted shell handlers suppress plugin hooks and retain sel
             command: join(f.bin, 'greatping'),
             args: ['hook', host, '--finished', '--alerts', 'questions'],
           }
-        : { command: `'${join(f.bin, 'greatping')}' hook '${host}' --finished` };
+        : {
+            command:
+              format === 'windows'
+                ? windowsShellCommand([join(f.bin, 'greatping'), 'hook', host, '--finished'])
+                : `'${join(f.bin, 'greatping')}' hook '${host}' --finished`,
+          };
     f.write(path, { hooks: { Stop: [{ hooks: [handler, { command: 'foreign-hook' }] }] } });
     const before = readFileSync(path, 'utf8');
     assert.equal(f.run(host, 'configure').status, 0);

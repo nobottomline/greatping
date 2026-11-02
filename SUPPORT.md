@@ -8,10 +8,20 @@ store availability, a delivery SLA or native remote approval of agent prompts.
 
 New source builds require Node.js 22.20 or later. Development and builds use Node
 24 LTS from `.node-version`; installed packages declare their own requirements.
-CI qualifies the same archive on Node 22.20 and 24 on Linux, macOS and Windows.
-Linux/macOS checks include hook fixtures, MCP and interactive PTYs. Windows
-checks installation, the npm launcher, help and a removal dry-run. Native Windows
-hooks, terminal behavior and credential ACLs are not yet release-qualified.
+CI is configured to qualify the same archive on Node 22.20 and 24 on Linux,
+macOS, Windows and Ubuntu 24.04 under WSL1/WSL2. Linux/macOS/WSL checks include
+hook fixtures, MCP and interactive PTYs. Windows checks both PowerShell 5.1 and
+7, npm CMD launchers, literal arguments, pairing, encrypted notify/ask fixtures,
+installed hook execution, credential ACLs and owned process-tree cancellation.
+These jobs must pass for the candidate being released; configuration alone is
+not evidence of a successful native run. Real agent trust/activation, Windows
+console Ctrl+C and phone delivery still need real-host acceptance.
+
+Install Node and GreatPing inside the same environment as the agent. For WSL,
+use Linux Node and keep configuration in the distribution's Linux filesystem,
+not a shared `/mnt/c` directory. Windows uses built-in Windows PowerShell to
+secure private state and execute encoded hook launchers. Permission failures
+stop credential access; do not bypass them by disabling Windows protections.
 
 Synthetic integration tests do not establish compatibility with every future
 Claude Code/Codex version or confirm phone delivery. Host updates need explicit

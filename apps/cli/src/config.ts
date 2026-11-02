@@ -1,10 +1,12 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { SERVICE_ORIGIN } from '@greatping/protocol';
 import type { Manifest } from '@greatping/protocol/crypto';
 import { UsageError } from './commands/usage';
+import { ensurePrivateStateDirectory } from './private-state';
 
 export const DEFAULT_API_URL = SERVICE_ORIGIN;
 
@@ -12,6 +14,11 @@ export const DEFAULT_API_URL = SERVICE_ORIGIN;
 export function pairingProblem(config: Config): 'unpaired' | 'environment_mismatch' | null {
   if (!isPaired(config)) return 'unpaired';
   return config.apiUrl === DEFAULT_API_URL ? null : 'environment_mismatch';
+}
+
+export interface QuestionCancellation {
+  requestId: string;
+  expiresAt: number;
 }
 
 export interface Config {
@@ -24,6 +31,8 @@ export interface Config {
   manifest?: Manifest;
   /** Exact final tag awaiting acknowledgement; replayed without another ceremony. */
   pendingCeremonyTag?: string;
+  /** Only questions this caller explicitly cancelled; no prompt or answer content. */
+  pendingQuestionCancellations?: QuestionCancellation[];
 }
 
 /**
@@ -48,6 +57,7 @@ export function configPath(): string {
 
 /** The service is built in. A saved URL binds an existing credential to its issuer. */
 export function loadConfig(): Config {
+  if (platform() === 'win32' && existsSync(configPath())) ensurePrivateStateDirectory(configDir());
   let saved: Record<string, unknown> = {};
   try {
     if (existsSync(configPath())) {
@@ -84,6 +94,20 @@ export function loadConfig(): Config {
     /^[A-Za-z0-9_-]{86}$/.test(saved.pendingCeremonyTag)
   )
     config.pendingCeremonyTag = saved.pendingCeremonyTag;
+  if (Array.isArray(saved.pendingQuestionCancellations)) {
+    const pending = saved.pendingQuestionCancellations
+      .filter(
+        (value): value is QuestionCancellation =>
+          value !== null &&
+          typeof value === 'object' &&
+          typeof value.requestId === 'string' &&
+          /^[A-Za-z0-9_-]{1,64}$/.test(value.requestId) &&
+          Number.isSafeInteger(value.expiresAt) &&
+          value.expiresAt > 0,
+      )
+      .map(({ requestId, expiresAt }) => ({ requestId, expiresAt }));
+    if (pending.length) config.pendingQuestionCancellations = pending;
+  }
   return config;
 }
 
@@ -97,13 +121,128 @@ export function requireServer(config: Config): void {
   );
 }
 
-/** Writes the config readable only by the current user; it holds the machine token. */
-export function saveConfig(config: Config): void {
+/** The complete local credential identity; manifest refreshes never replace it. */
+export function samePairing(a: Config, b: Config): boolean {
+  return (
+    isPaired(a) &&
+    isPaired(b) &&
+    a.apiUrl === b.apiUrl &&
+    a.machineId === b.machineId &&
+    a.machineToken === b.machineToken &&
+    a.keys?.sign === b.keys?.sign &&
+    a.keys?.enc === b.keys?.enc &&
+    a.manifest?.account === b.manifest?.account
+  );
+}
+
+/**
+ * Cross-process bakery lock: each writer owns a unique, atomically published
+ * ticket. Unlike stealing a shared stale mutex, ignoring a dead writer cannot
+ * remove a new writer's lock. Only synchronous filesystem work runs inside.
+ */
+function withConfigLock<T>(change: () => T, timeoutMs = 5000): T {
   const dir = configDir();
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  ensurePrivateStateDirectory(dir);
+  const prefix = '.config-lock-';
+  const name = `${prefix}${process.pid}-${randomUUID()}`;
+  const path = join(dir, name);
+  const temporary = `${path}.tmp`;
+  const deadline = Date.now() + timeoutMs;
+  const pause = () => {
+    if (Date.now() >= deadline) throw new Error('Local pairing is busy. Retry the command.');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+  };
+  const tickets = () => readdirSync(dir).filter((n) => n.startsWith(prefix) && !n.endsWith('.tmp'));
+  const read = (other: string): number | null => {
+    const pid = Number(other.slice(prefix.length).split('-')[0]);
+    try {
+      process.kill(pid, 0);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ESRCH') {
+        // This exact unique name can never belong to a later writer.
+        rmSync(join(dir, other), { force: true });
+        rmSync(join(dir, `${other}.tmp`), { force: true });
+        return null;
+      }
+    }
+    try {
+      const value = readFileSync(join(dir, other), 'utf8');
+      return value === '' ? 0 : Number(value);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+  };
+  // Empty means this writer is choosing its ticket; peers wait for publication.
+  writeFileSync(path, '', { mode: 0o600, flag: 'wx' });
+  try {
+    let ticket = 1;
+    for (const other of tickets()) {
+      const value = read(other);
+      if (value !== null && Number.isSafeInteger(value)) ticket = Math.max(ticket, value + 1);
+    }
+    writeFileSync(temporary, String(ticket), { mode: 0o600, flag: 'wx' });
+    renameSync(temporary, path);
+    for (const other of tickets()) {
+      if (other === name) continue;
+      for (;;) {
+        const value = read(other);
+        if (value === null || (value > 0 && (value > ticket || (value === ticket && other > name))))
+          break;
+        pause();
+      }
+    }
+    return change();
+  } finally {
+    rmSync(temporary, { force: true });
+    rmSync(path, { force: true });
+  }
+}
+
+function writeConfig(config: Config): void {
+  const temporary = `${configPath()}.${randomUUID()}.tmp`;
   const saved = config.manifest ? { ...config, manifestEncoding: MANIFEST_ENCODING } : config;
-  writeFileSync(configPath(), JSON.stringify(saved, null, 2), { encoding: 'utf-8', mode: 0o600 });
-  chmodSync(configPath(), 0o600);
+  try {
+    writeFileSync(temporary, JSON.stringify(saved, null, 2), {
+      encoding: 'utf-8',
+      mode: 0o600,
+      flag: 'wx',
+    });
+    renameSync(temporary, configPath());
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
+/** Explicit pairing/replacement, atomically readable and private to this user. */
+export function saveConfig(config: Config): void {
+  withConfigLock(() => writeConfig(config));
+}
+
+/** Updates only the still-current pairing, preserving concurrent local changes. */
+export function updateConfig(
+  expected: Config,
+  change: (current: Config) => Config | undefined,
+  timeoutMs = 5000,
+): Config {
+  return withConfigLock(() => {
+    const current = loadConfig();
+    if (!samePairing(expected, current))
+      throw new Error('Local pairing changed. Retry the command with the current pairing.');
+    const next = change(current);
+    if (next) writeConfig(next);
+    return next ?? current;
+  }, timeoutMs);
+}
+
+/** Removal uses the same lock as refresh and never deletes a newly paired identity. */
+export function removeConfig(expected: Config): void {
+  withConfigLock(() => {
+    const current = loadConfig();
+    if (isPaired(expected) ? !samePairing(expected, current) : isPaired(current))
+      throw new Error('Local pairing changed. Retry removal with the current pairing.');
+    rmSync(configPath(), { force: true });
+  });
 }
 
 export function isPaired(

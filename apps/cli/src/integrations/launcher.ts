@@ -2,6 +2,10 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import process from 'node:process';
+import {
+  parseWindowsShellCommand,
+  windowsShellCommand,
+} from '../../../../plugins/shared/windows-command.mjs';
 import { detectInstallation } from '../installation';
 import { supportsNodeVersion } from '../version';
 import { findAllOnPath, findOnPath, isExecutable } from './executables';
@@ -72,13 +76,9 @@ export function launcherProblem(command: string, args: string[]): string | null 
   return null;
 }
 
-/** POSIX shell quoting for hosts that take a command string. */
+/** A host command string; Windows transports argv outside cmd's parser. */
 export function shellCommand(parts: string[]): string {
-  if (process.platform === 'win32') {
-    return parts
-      .map((part) => (/[\s"]/.test(part) ? `"${part.replace(/"/g, '\\"')}"` : part))
-      .join(' ');
-  }
+  if (process.platform === 'win32') return windowsShellCommand(parts);
   return parts
     .map((part) => (/^[\w./:@%+=,-]+$/.test(part) ? part : `'${part.replace(/'/g, `'\\''`)}'`))
     .join(' ');
@@ -86,6 +86,8 @@ export function shellCommand(parts: string[]): string {
 
 /** Splits a command string written by `shellCommand` back into its parts. */
 export function parseShellCommand(command: string): string[] {
+  const windows = parseWindowsShellCommand(command);
+  if (windows !== null) return windows;
   const parts: string[] = [];
   const pattern = /'((?:[^']|'\\'')*)'|"((?:[^"\\]|\\.)*)"|(\S+)/g;
   for (const match of command.matchAll(pattern)) {

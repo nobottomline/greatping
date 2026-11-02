@@ -3,7 +3,6 @@ import {
   chmodSync,
   existsSync,
   linkSync,
-  mkdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -14,6 +13,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { type AlertHost, LIMITS, type ProjectLabels } from '@greatping/protocol';
 import { z } from 'zod';
 import { configDir } from './config';
+import { ensurePrivateStateDirectory } from './private-state';
 
 /**
  * What a computer derives locally to describe an alert without revealing what
@@ -54,7 +54,7 @@ export const identityPath = () => join(configDir(), 'alerts.json');
  */
 function save(settings: Settings, exclusive = false): boolean {
   const dir = configDir();
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 });
+  ensurePrivateStateDirectory(dir);
   const temporary = `${identityPath()}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   writeFileSync(temporary, JSON.stringify(settings, null, 2), { mode: 0o600 });
   chmodSync(temporary, 0o600);
@@ -74,6 +74,7 @@ function save(settings: Settings, exclusive = false): boolean {
 
 function read(): Settings | null {
   if (!existsSync(identityPath())) return null;
+  if (process.platform === 'win32') ensurePrivateStateDirectory(configDir());
   return settingsSchema.parse(JSON.parse(readFileSync(identityPath(), 'utf8')));
 }
 

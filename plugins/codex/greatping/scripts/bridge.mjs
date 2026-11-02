@@ -16,6 +16,7 @@ import {
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseWindowsShellCommand } from './windows-command.mjs';
 
 const HOSTS = ['claude', 'codex', 'opencode', 'pi', 'cursor'];
 const ALERTS = ['questions', 'permissions', 'tool-input'];
@@ -161,6 +162,8 @@ function invocation(handler) {
     return handler.args.every((arg) => typeof arg === 'string')
       ? [handler.command, ...handler.args]
       : [];
+  const windows = parseWindowsShellCommand(handler.command);
+  if (windows !== null) return windows;
   const parts = [];
   const pattern = /'((?:[^']|'\\'')*)'|"((?:[^"\\]|\\.)*)"|(\S+)/g;
   for (const match of handler.command.matchAll(pattern))

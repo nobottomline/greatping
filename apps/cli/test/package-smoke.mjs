@@ -86,6 +86,7 @@ try {
       '--test',
       'test/hook-runner.test.mjs',
       'test/mcp.test.mjs',
+      'test/platform.test.mjs',
       ...(process.platform === 'win32'
         ? []
         : ['test/plugins.test.mjs', 'test/native-adapters.test.mjs']),

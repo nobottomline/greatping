@@ -18,6 +18,7 @@ import { type Config, isPaired, loadConfig, pairingProblem } from './config';
 import { sealRequest, syncProjectCommands, UnverifiedAnswerError, verifyAnswer } from './content';
 import { projectFields } from './identity';
 import { hostIntegrations, pluginDiagnostics } from './integrations';
+import { reconcileQuestionCancellations, withdrawQuestion } from './question-cancellation';
 
 function paired(): Config {
   const config = loadConfig();
@@ -84,6 +85,8 @@ export async function sendNotice(
   if (title !== undefined && title.length > 100)
     throw new UsageError('notify', 'Titles are limited to 100 characters.');
   const config = paired();
+  await reconcileQuestionCancellations(config, signal);
+  signal?.throwIfAborted();
   const { projectLabel, ...source } = originFields(origin);
   const envelope = await sealRequest(
     config,
@@ -124,7 +127,10 @@ export async function changePause(
       durationSeconds > LIMITS.pauseMaxSec)
   )
     throw new UsageError('pause', 'Pause for at least a minute and at most 7 days.');
-  return api<PauseMachineResponse>(paired(), 'PUT', '/machine/me/pause', {
+  const config = paired();
+  await reconcileQuestionCancellations(config, signal);
+  signal?.throwIfAborted();
+  return api<PauseMachineResponse>(config, 'PUT', '/machine/me/pause', {
     body: { until: durationSeconds === null ? null : Date.now() + durationSeconds * 1000 },
     signal: bounded(signal),
   });
@@ -202,6 +208,8 @@ export async function askQuestion(
   const config = paired(),
     { signal } = options;
   signal?.throwIfAborted();
+  await reconcileQuestionCancellations(config, signal);
+  signal?.throwIfAborted();
   // Once creation begins, finish it even on cancellation so the returned ID can
   // be withdrawn. Aborting a POST can otherwise orphan a question on the phone.
   const { projectLabel, ...source } = originFields(options.origin ?? COMMAND_ORIGIN);
@@ -237,9 +245,10 @@ export async function askQuestion(
     body,
     signal: AbortSignal.timeout(8000),
   });
-  await applyWaitingCommands(config);
   try {
     options.onCreated?.(request);
+    signal?.throwIfAborted();
+    await applyWaitingCommands(config);
     const result = await waitForAnswer(config, request, signal);
     if (result.status === 'pending') throw new Error('The question ended without a final state.');
     const answer =
@@ -261,16 +270,12 @@ export async function askQuestion(
   } catch (error) {
     if (error instanceof UnverifiedAnswerError) {
       // Fail closed: the question is withdrawn, and nothing unverified is returned.
-      await api(config, 'POST', `/requests/${request.id}/cancel`, {
-        signal: AbortSignal.timeout(3000),
-      }).catch(() => {});
+      await withdrawQuestion(config, request);
       throw error;
     }
     if (!signal?.aborted) throw error;
     // Cancellation is acknowledged only after the server accepts withdrawal.
-    await api(config, 'POST', `/requests/${request.id}/cancel`, {
-      signal: AbortSignal.timeout(3000),
-    });
+    await withdrawQuestion(config, request);
     return { requestId: request.id, status: 'cancelled', paused: request.paused === true };
   }
 }

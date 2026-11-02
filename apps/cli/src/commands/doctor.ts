@@ -1,5 +1,8 @@
 import { spawnSync } from 'node:child_process';
-import type { MachineMeResponse } from '@greatping/protocol';
+import os from 'node:os';
+import process from 'node:process';
+import type { DiagnosticsReport, MachineMeResponse } from '@greatping/protocol';
+import { formatDiagnostics } from '@greatping/protocol/diagnostics';
 import { api } from '../api';
 import { DEFAULT_API_URL, isPaired, loadConfig, pairingProblem } from '../config';
 import { ago, clock } from '../duration';
@@ -17,6 +20,7 @@ import type { HostId } from '../integrations/state';
 import { CommandInterrupted, withProgress } from '../progress';
 import { reportMachineWithProgress } from '../report';
 import { color, command, muted, print, ui } from '../ui';
+import { VERSION } from '../version';
 
 type Check = [label: string, value: string];
 const inspectHost = (id: HostId) => readHost(id, true);
@@ -340,4 +344,42 @@ export async function doctor(options: { fix: boolean; verbose?: boolean }): Prom
   ui.success('Everything looks good.');
   print();
   return 0;
+}
+
+/**
+ * `greatping doctor --report`: the support report of this computer on stdout,
+ * to read and paste into a message to support. Unlike the rest of doctor
+ * it holds no paths, names, service address or raw errors; the service
+ * sends only this computer, its own alerts and each device's mode for it.
+ */
+export async function doctorReport(): Promise<number> {
+  const config = loadConfig();
+  if (!isPaired(config)) {
+    ui.error('This computer is not paired.', `Run ${command('greatping login')} first.`);
+    return 1;
+  }
+  const installation = detectInstallation();
+  const local = [
+    `GreatPing CLI ${VERSION} · Node ${process.versions.node}`,
+    `System: ${process.platform} ${os.release()} ${process.arch}`,
+    `Installation: ${installation.manager === 'local' || installation.manager === 'unknown' ? 'other' : installation.manager}`,
+    `Service: ${config.apiUrl === DEFAULT_API_URL ? 'GreatPing' : 'custom'}`,
+  ];
+  try {
+    const report = await withProgress('Reading diagnostics from GreatPing', (signal) =>
+      api<DiagnosticsReport>(config, 'GET', '/machine/me/diagnostics', {
+        signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
+      }),
+    );
+    process.stdout.write(formatDiagnostics(report, local));
+    ui.info(`Send this to support@greatping.com with a description of the problem.`);
+    return 0;
+  } catch (error) {
+    if (error instanceof CommandInterrupted) throw error;
+    process.stdout.write(
+      `GreatPing support report\n\nThis app or CLI\n${local.map((line) => `  ${line}`).join('\n')}\n\nThe service could not be reached.\n`,
+    );
+    ui.warn('GreatPing could not be reached; only this computer’s part is included.');
+    return 1;
+  }
 }

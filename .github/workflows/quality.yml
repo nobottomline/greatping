@@ -85,7 +85,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest]
         node: ['22.20.0', '24']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -121,44 +121,9 @@ jobs:
         env:
           GREATPING_TEST_PAIRING_FIXTURE: ${{ runner.temp }}/candidate/fixtures/pairing-fetch.mjs
         run: node apps/cli/test/package-smoke.mjs "$RUNNER_TEMP/candidate/greatping.tgz"
-      # Unix PTY and mock-host suites do not qualify native Windows hooks.
-      # Windows checks installation, the npm launcher and offline commands.
-      - if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $installation = Join-Path $env:RUNNER_TEMP 'cli-install'
-          # setup-node's versioned cache is deliberately rejected as a durable
-          # plugin launcher. Use a stable fixture path for this exact matrix
-          # runtime, as a normal installed runtime/shim provides for users.
-          $runtime = Join-Path $env:RUNNER_TEMP 'cli-runtime'
-          New-Item -ItemType Directory -Force $runtime | Out-Null
-          Copy-Item (Get-Command node.exe).Source (Join-Path $runtime 'node.exe')
-          $env:PATH = "$runtime;$env:PATH"
-          $env:HOME = Join-Path $env:RUNNER_TEMP 'cli-home'
-          $env:USERPROFILE = $env:HOME
-          $env:APPDATA = Join-Path $env:HOME 'AppData/Roaming'
-          $env:XDG_CONFIG_HOME = Join-Path $env:HOME '.config'
-          $env:CODEX_HOME = Join-Path $env:HOME '.codex'
-          New-Item -ItemType Directory -Force $env:HOME | Out-Null
-          npm install --prefix $installation --ignore-scripts --no-audit --no-fund --package-lock=false "$env:RUNNER_TEMP/candidate/greatping.tgz"
-          if ($LASTEXITCODE -ne 0) { throw 'Package installation failed' }
-          $launcher = Join-Path $installation 'node_modules/.bin/greatping.cmd'
-          $package = Get-Content (Join-Path $installation 'node_modules/greatping/package.json') | ConvertFrom-Json
-          $version = & $launcher --version
-          if ($LASTEXITCODE -ne 0 -or $version.Trim() -ne $package.version) { throw 'npm launcher/version failed' }
-          & $launcher --help
-          if ($LASTEXITCODE -ne 0) { throw 'Help failed' }
-          $plan = & $launcher uninstall --dry-run --json
-          if ($LASTEXITCODE -ne 0) { throw 'Offline uninstall plan failed' }
-          $plan | ConvertFrom-Json | Out-Null
-          if (Test-Path "$env:XDG_CONFIG_HOME/greatping/config.json") { throw 'Dry-run wrote a credential' }
-          & $launcher setup opencode --yes
-          if ($LASTEXITCODE -ne 0) { throw 'Offline native adapter setup failed' }
-          $state = (& $launcher status --json) | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 1) { throw 'Expected unpaired status' }
-          $adapter = $state.plugins | Where-Object { $_.id -eq 'opencode' }
-          if ($adapter.status -ne 'ready') { throw 'Native adapter inventory failed' }
-          & $launcher setup opencode --remove --yes
-          if ($LASTEXITCODE -ne 0) { throw 'Native adapter removal failed' }
-          if (Test-Path "$env:XDG_CONFIG_HOME/opencode/plugins/greatping.js") { throw 'Native entrypoint remains' }
-          if (Test-Path "$env:XDG_CONFIG_HOME/greatping/config.json") { throw 'Native setup wrote a credential' }
+  platforms:
+    needs: build
+    uses: ./.github/workflows/cli-platforms.yml
+    with:
+      source: ${{ inputs.source }}
+      artifact-name: ${{ inputs.artifact-name }}

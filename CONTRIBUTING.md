@@ -6,9 +6,11 @@ Issues and pull requests are welcome. Before a larger change, open an issue to d
 
 Use Node.js 24 LTS (24.11 or later within 24.x), as recorded in `.node-version`.
 The installed CLI supports Node.js 22.20 and later; CI tests the packed CLI on
-22.20 and 24 on Linux and macOS with hooks, MCP and PTY fixtures. Windows CI
-checks package installation, the npm launcher and offline commands. Native
-Windows agent hooks and credential ACLs require separate qualification.
+22.20 and 24 on Linux, macOS, Windows and WSL1/WSL2. Windows qualification covers
+PowerShell 5.1/7, CMD shims, private ACLs and simulated pairing/agent flows;
+Linux/macOS/WSL also exercise MCP and PTYs. Inspect the candidate's actual job
+results before claiming platform compatibility. Real agent activation and phone
+delivery remain separate acceptance checks.
 
 ```bash
 pnpm install --frozen-lockfile

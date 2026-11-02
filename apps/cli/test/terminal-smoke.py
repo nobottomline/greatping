@@ -121,6 +121,39 @@ try:
             'GREATPING_TEST_ORIGIN': SERVICE_ORIGIN,
             'NO_UPDATE_NOTIFIER': '1'}
 
+        # Interactive commands remain in the terminal's process group and keep
+        # readable stdin. Wrapper-targeted signals and group Ctrl+C both cancel
+        # without turning an exit-0 signal handler into a completion notice.
+        t = Terminal(['run', '--on-fail', '--', NODE, '-e',
+            "process.stdin.setEncoding('utf8');console.log('INPUT READY');process.stdin.once('data',x=>{console.log('ECHO:'+x.trim());process.exit(0)})"], env)
+        t.wait('INPUT READY'); os.write(t.master, b'hello\n'); t.finish()
+        assert 'ECHO:hello' in t.output, t.output
+        for sig in [signal.SIGINT, signal.SIGTERM]:
+            for group in [False, True]:
+                t = Terminal(['run', '--', NODE, '-e',
+                    "process.on('SIGINT',()=>{console.log('CHILD SIGINT');process.exit(0)});process.on('SIGTERM',()=>process.exit(0));console.log('SIGNAL READY');setInterval(()=>{},1000)"], env)
+                t.wait('SIGNAL READY')
+                interrupted_at = time.monotonic()
+                if group: os.killpg(t.process.pid, sig)
+                else: os.kill(t.process.pid, sig)
+                t.finish(130 if sig == signal.SIGINT else 143)
+                if sig == signal.SIGINT and not group:
+                    assert 4 <= time.monotonic() - interrupted_at < 7, t.output
+                    assert 'CHILD SIGINT' not in t.output, t.output
+                assert 'completion notice' not in t.output and 'could not send' not in t.output, t.output
+        print('PASS Interactive run preserves stdin and handles targeted/group cancellation without completion alerts')
+
+        # One group Ctrl+C must not become a second SIGINT while the child's
+        # first handler performs real asynchronous cleanup.
+        t = Terminal(['run', '--', NODE, '-e',
+            "let count=0;process.on('SIGINT',()=>{console.log('INTERRUPT DELIVERY:'+ ++count);if(count===1)setTimeout(()=>{console.log('INTERRUPT DELIVERIES:'+count);process.exit(0)},200);else process.exit(99)});console.log('SLOW SIGNAL READY');setInterval(()=>{},1000)"], env)
+        t.wait('SLOW SIGNAL READY'); os.killpg(t.process.pid, signal.SIGINT); t.finish(130)
+        assert t.output.count('INTERRUPT DELIVERY:1') == 1, t.output
+        assert 'INTERRUPT DELIVERY:2' not in t.output, t.output
+        assert 'INTERRUPT DELIVERIES:1' in t.output, t.output
+        assert 'completion notice' not in t.output and 'could not send' not in t.output, t.output
+        print('PASS One terminal Ctrl+C reaches a slow child SIGINT handler exactly once')
+
         actions = ['show', 'labels folder', 'labels hidden', 'name <name>', 'hide', 'reset', 'list']
         for args in [['project'], ['project', '--help'], ['help', 'project']]:
             result = subprocess.run([NODE, str(CLI), *args], env=env,

@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { api, takeCommandsWaiting } from '../src/api.ts';
 import { detectAgents, steps } from '../src/commands/setup-flow.ts';
-import { DEFAULT_API_URL } from '../src/config.ts';
+import { DEFAULT_API_URL, saveConfig } from '../src/config.ts';
 import {
   cachedProjectLabels,
   projectFields,
@@ -610,6 +610,7 @@ async function fakeServer(handler) {
 test('hook steps open, retry and resolve alerts on the server', async () => {
   await withHome(async (root) => {
     const server = await fakeServer((call, calls) => {
+      if (call.path.startsWith('/v1/manifests')) return { manifests: [] };
       if (call.path === '/v1/requests/resolve') {
         // The first resolve races ahead of its alert; the retry finds it.
         const attempts = calls.filter(
@@ -626,6 +627,7 @@ test('hook steps open, retry and resolve alerts on the server', async () => {
     };
     try {
       const config = pairedConfig(DEFAULT_API_URL);
+      saveConfig(config);
       const project = join(root, 'billing-api');
       mkdirSync(join(project, '.git'), { recursive: true });
       rememberProjectLabels('folder');
@@ -969,6 +971,7 @@ test('the computer lists its projects sealed and applies renames a device signed
     rememberProjectLabels('folder');
     const { projectKey } = projectFields(project);
     const server = await fakeServer((call) => {
+      if (call.path.startsWith('/v1/manifests')) return { manifests: [] };
       if (call.path === '/v1/machine/me/project-commands/take')
         return {
           commands: [
@@ -984,7 +987,9 @@ test('the computer lists its projects sealed and applies renames a device signed
     globalThis.fetch = (url, options) =>
       originalFetch(String(url).replace(DEFAULT_API_URL, server.url), options);
     try {
-      await reportMachine(pairedConfig(DEFAULT_API_URL));
+      const config = pairedConfig(DEFAULT_API_URL);
+      saveConfig(config);
+      await reportMachine(config);
       const report = server.calls.find((c) => c.method === 'PATCH');
       assert.doesNotMatch(JSON.stringify(report.body), /acme/);
       assert.deepEqual(openAsPhone(report.body.projectsEnvelope, 'projects'), {

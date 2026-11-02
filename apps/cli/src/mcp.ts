@@ -46,6 +46,9 @@ export function createMcpServer(): McpServer {
   const server = new McpServer(
     { name: 'greatping', version: VERSION },
     {
+      capabilities: {
+        experimental: { 'greatping/cancellation': { version: 1, timeoutMs: 25000 } },
+      },
       instructions:
         'GreatPing sends phone alerts and separate phone questions. Native host questions and approvals stay in the host. Installed hooks already alert for native prompts; do not duplicate those alerts. Use notify for requested outcome alerts, or a generic native-prompt alert only when automatic hooks are unavailable. Use ask_user only when the user explicitly wants to answer a separate GreatPing question on a device. Pause or resume alerts only at the user’s request. Never include secrets, credentials, private file contents or code in messages. Installation, pairing, repair and removal are managed through the CLI.',
     },
@@ -122,12 +125,14 @@ export function createMcpServer(): McpServer {
       annotations: mutating,
     },
     async ({ question, choices, allowText, timeoutSeconds }, ctx) => {
+      let settled = false;
       try {
         const value = await askQuestion(question, choices ?? [], timeoutSeconds, {
           allowText,
           signal: ctx.mcpReq.signal,
           origin: origin(),
         });
+        settled = true;
         return result(
           { ...value },
           value.answer?.choice ?? value.answer?.text ?? `The question was ${value.status}.`,
@@ -135,6 +140,16 @@ export function createMcpServer(): McpServer {
         );
       } catch (error) {
         return failure(error);
+      } finally {
+        // MCP suppresses the cancelled request's normal response. Opted-in local
+        // adapters need a separate, exact-request acknowledgement after cleanup.
+        if (ctx.mcpReq.signal.aborted && ctx.mcpReq._meta?.['greatping/cancellation'] === 1)
+          await ctx.mcpReq
+            .notify({
+              method: 'notifications/greatping/cancellation',
+              params: { requestId: ctx.mcpReq.id, confirmed: settled },
+            })
+            .catch(() => {});
       }
     },
   );

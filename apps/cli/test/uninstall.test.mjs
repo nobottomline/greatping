@@ -21,7 +21,7 @@ import { HOSTS, inspectHooks, installHooks } from '../src/integrations/host-hook
 import { fingerprint, recordAsset } from '../src/integrations/ownership.ts';
 import { installSkill } from '../src/integrations/skill.ts';
 
-const cli = new URL('../dist/index.js', import.meta.url).pathname;
+const cli = process.env.GREATPING_TEST_CLI ?? new URL('../dist/index.js', import.meta.url).pathname;
 const fixtureFetch = new URL('./fixtures/operations-fetch.mjs', import.meta.url).pathname;
 function json(path, value) {
   mkdirSync(join(path, '..'), { recursive: true });
@@ -130,11 +130,17 @@ test('dry-run plans every installed component without writes, manager calls or n
   home(({ root, bin, exec }) => {
     integrations(root, bin);
     pair(root);
+    json(join(root, '.config', 'greatping', 'alerts.json'), {
+      secret: 'private-id-secret',
+      recent: { key: { root: '/private/project' } },
+    });
     const before = hashes(root);
     const result = exec(['uninstall', '--dry-run', '--json']);
     assert.equal(result.status, 0, result.stderr);
     const plan = JSON.parse(result.stdout);
     assert.ok(plan.actions.some((a) => a.id === 'pairing'));
+    assert.ok(plan.actions.some((a) => a.id === 'local:alerts.json'));
+    assert.doesNotMatch(result.stdout, /private-id-secret|private\/project/);
     assert.ok(plan.actions.some((a) => a.id.startsWith('skill:')));
     assert.deepEqual(hashes(root), before);
     assert.doesNotMatch(result.stdout, /PRIVATE TOKEN/);
@@ -143,6 +149,11 @@ test('uninstall preserves foreign hooks, MCP and files, revokes pairing and is r
   home(({ root, bin, exec }) => {
     const foreign = integrations(root, bin);
     pair(root);
+    const alerts = join(root, '.config', 'greatping', 'alerts.json');
+    json(alerts, {
+      secret: 'private-id-secret',
+      projects: { '/private/project': { name: 'Private' } },
+    });
     const updateCache = join(root, '.config', 'greatping', 'update-check.json');
     json(updateCache, { latest: '99.0.0', attemptedAt: Date.now(), checkedAt: Date.now() });
     json(join(root, '.claude.json'), {
@@ -157,6 +168,7 @@ test('uninstall preserves foreign hooks, MCP and files, revokes pairing and is r
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).complete, true);
     assert.equal(existsSync(updateCache), false);
+    assert.equal(existsSync(alerts), false);
     assert.deepEqual(JSON.parse(readFileSync(HOSTS.claude.settingsPath(), 'utf8')), {
       model: 'opus',
       hooks: { Stop: [foreign] },
@@ -217,12 +229,16 @@ test('offline uninstall preserves credential; local-only removal explicitly skip
   home(({ root, exec }) => {
     pair(root);
     const config = join(root, '.config', 'greatping', 'config.json');
+    const alerts = join(root, '.config', 'greatping', 'alerts.json');
+    json(alerts, { secret: 'private-id-secret' });
     assert.equal(exec(['uninstall', '--yes', '--json'], 'network').status, 1);
     assert.ok(existsSync(config));
+    assert.ok(existsSync(alerts), 'failed revocation retains local recovery state');
     const result = exec(['uninstall', '--yes', '--local-only', '--json'], 'network');
     assert.equal(result.status, 0, result.stderr);
     assert.equal(JSON.parse(result.stdout).serverRevocation, 'skipped');
     assert.equal(existsSync(config), false);
+    assert.equal(existsSync(alerts), false);
   }));
 test('uninstall preserves unknown MCP ownership', async () =>
   home(({ root, exec }) => {

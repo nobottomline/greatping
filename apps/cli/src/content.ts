@@ -12,7 +12,7 @@ import {
 } from '@greatping/protocol/crypto';
 import { api } from './api';
 import { UsageError } from './commands/usage';
-import { type Config, loadConfig } from './config';
+import { type Config, loadConfig, samePairing } from './config';
 import { applyProjectCommand, recentProjects } from './identity';
 import { claimStamp } from './integrations/state';
 import { followManifest, randomBytes } from './keys';
@@ -58,7 +58,18 @@ async function manifestFor(config: Config, fresh: boolean): Promise<Manifest> {
         `${REPAIR} If this repeats, contact support.`,
       );
   }
-  return loadConfig().manifest ?? config.manifest;
+  const manifest = currentManifest(config);
+  if (!manifest)
+    throw new UsageError(null, 'Local pairing has no verified account history.', REPAIR);
+  return manifest;
+}
+
+/** Never combine an old operation's secret keys with a new local pairing. */
+function currentManifest(config: Config): Manifest | undefined {
+  const current = loadConfig();
+  if (!samePairing(config, current))
+    throw new UsageError(null, 'Local pairing changed, so nothing was sent.', 'Retry the command.');
+  return current.manifest;
 }
 
 const accountOf = (manifest: Manifest) => manifest.account;
@@ -101,7 +112,7 @@ export async function verifyAnswer(
   answerEnvelope: Envelope | null,
 ): Promise<Answer> {
   if (!answerEnvelope) throw new UnverifiedAnswerError('missing');
-  let manifest = loadConfig().manifest ?? config.manifest;
+  let manifest = currentManifest(config);
   if (!manifest) throw new UnverifiedAnswerError('no_manifest');
   // An answer from a device linked after the question needs the newer manifest.
   if (answerEnvelope.manifest > manifest.version) manifest = await manifestFor(config, true);

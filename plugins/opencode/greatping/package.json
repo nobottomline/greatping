@@ -1,6 +1,6 @@
 {
   "name": "@greatping/opencode",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "license": "MIT",
   "description": "GreatPing native opencode adapter, phone alerts, tools and skill.",
@@ -8,6 +8,7 @@
   "files": [
     "index.js",
     "bridge.mjs",
+    "windows-command.mjs",
     "native.mjs",
     "skills",
     "LICENSE",
