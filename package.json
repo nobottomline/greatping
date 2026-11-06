@@ -26,11 +26,11 @@
     "plugins:test:native": "pnpm -F greatping build && node scripts/verify-native-adapters.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.15",
-    "oxlint": "1.87.0",
-    "oxlint-tsgolint": "7.0.2003",
+    "@biomejs/biome": "^2.6.4",
+    "oxlint": "1.90.0",
+    "oxlint-tsgolint": "7.0.2005",
     "typescript": "~5.9.3",
-    "knip": "6.39.0"
+    "knip": "6.44.1"
   },
   "packageManager": "pnpm@10.33.0"
 }
