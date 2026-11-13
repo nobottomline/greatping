@@ -41,24 +41,24 @@
     "test:package": "pnpm build && node test/package-smoke.mjs"
   },
   "dependencies": {
-    "@clack/prompts": "1.8.1",
-    "@modelcontextprotocol/server": "2.3.1",
+    "@clack/prompts": "1.9.0",
+    "@modelcontextprotocol/server": "2.4.0",
     "@noble/ciphers": "^2.4.0",
     "@noble/curves": "^2.4.0",
     "@noble/hashes": "^2.4.0",
     "cross-spawn": "7.0.6",
     "picocolors": "^1.1.1",
-    "smol-toml": "^1.9.0",
+    "smol-toml": "^1.9.1",
     "toqr": "0.1.1",
-    "ws": "^8.22.0",
-    "zod": "^4.6.5"
+    "ws": "^8.22.2",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@greatping/protocol": "workspace:*",
     "@types/cross-spawn": "6.0.6",
     "@types/node": "^22.13.11",
     "@types/ws": "^8.18.2",
-    "tsdown": "0.23.0",
+    "tsdown": "0.23.7",
     "typescript": "~5.9.3"
   }
 }
